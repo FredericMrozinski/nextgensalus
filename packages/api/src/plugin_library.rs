@@ -44,3 +44,12 @@ pub fn get_plugin_from_id(plugin_id: &u32) -> Option<Plugin> {
 
     res
 }
+
+pub fn get_plugins() -> Vec<(u32, Plugin)> {
+    let res: Vec<(u32, Plugin)> = plugins().lock().unwrap()
+        .iter()
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect();
+
+    res
+}

@@ -1,4 +1,4 @@
-use crate::models::{Plugin, User};
+use crate::models::{Plugin, PluginDescription, User};
 use axum_extra::extract::CookieJar;
 use dioxus::fullstack::ServerFnError::ServerError;
 #[cfg(feature = "server")]
@@ -29,5 +29,15 @@ pub async fn spawn_frontend_plugin_process(plugin_id: u32, user: User) -> Result
     }
 
     Ok(plugin_process_manager::spawn_frontend_plugin_process(plugin_id, &user))
+}
+
+#[server]
+// TODO, at some point (as with everything) a session token needs to be passed here so that
+// only the user allowed plugins will be returned
+pub async fn get_available_plugins() -> Result<Vec<(u32, PluginDescription)>, ServerFnError> {
+    let res = plugin_library::get_plugins().iter()
+        .map(|(id, plugin)| (id.clone(), plugin.manifest.description.clone())).collect();
+
+    Ok(res)
 }
 

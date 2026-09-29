@@ -110,7 +110,7 @@ fn loop_backend_plugin_stream_read(mut read_half: ReadHalf<Box<dyn Stream>>) {
                     message_frame_bytes.extend(received_message_frame_bytes);
 
                     if message_frame_bytes.len() == message_frame_size {
-
+                        
                         tx.send(message_frame_bytes).await;
 
                         message_frame_bytes = Vec::new();

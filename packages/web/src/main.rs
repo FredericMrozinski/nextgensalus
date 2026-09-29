@@ -1,8 +1,10 @@
+#[allow(dead_code)]
 mod plugin_frame;
 mod frontend_communication_relay;
+mod workspace;
 
 use dioxus::prelude::*;
-use plugin_frame::PluginFrame;
+use workspace::Workspace;
 
 
 fn main() {
@@ -22,7 +24,7 @@ fn App() -> Element {
         frontend_communication_relay::init_plugin_bridge();
     });
 
-     rsx! {
-        PluginFrame { plugin_id: 10000 }
+    rsx! {
+        Workspace {}
     }
 }
