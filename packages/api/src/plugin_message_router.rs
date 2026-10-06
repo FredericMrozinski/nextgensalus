@@ -12,9 +12,14 @@ use dioxus::prelude::ReadableOptionExt;
 use futures_util::{sink::SinkExt, stream::StreamExt};
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::task::JoinHandle;
-use crate::message_frame::PluginMessageFrame;
+use crate::message_frame::{PluginMessageFrame, ALL_FRONTENDS, FLAG_MORE_FRAGMENTS, MAX_FRAME_SIZE};
+use crate::{http_gateway, salus_control};
+use std::sync::atomic::{AtomicU32, Ordering};
 use dioxus::prelude::*;
 use tokio::net::UnixStream;
+
+// Cap for reassembled fragmented messages.
+const MAX_MESSAGE_SIZE: usize = 1024 * 1024 * 1024;
 
 pub trait Stream: AsyncRead + AsyncWrite + Unpin + Send {}
 impl<T: AsyncRead + AsyncWrite + Unpin + Send> Stream for T {}
@@ -54,6 +59,11 @@ async fn get_write_stream_for(backend_pid: u32) -> Option<Arc<Mutex<WriteHalf<Un
     Some(write_stream)
 }
 
+fn next_message_id() -> u32 {
+    static NEXT_MESSAGE_ID: AtomicU32 = AtomicU32::new(1);
+    NEXT_MESSAGE_ID.fetch_add(1, Ordering::SeqCst)
+}
+
 pub fn establish_backend_streams(
     be_pid: u32,
     socket_handle: BackendPluginSocketHandle
@@ -71,7 +81,12 @@ pub fn establish_backend_streams(
 
         get_stream_writers().lock().await.insert(be_pid, arc_mutex_writer);
 
-        loop_backend_plugin_stream_read(reader);
+        loop_backend_plugin_stream_read(be_pid, reader);
+
+        // The SDK learns about bound frontends solely from these events.
+        for fe_pid in plugin_process_manager::get_frontends_for_backend(be_pid) {
+            salus_control::send_frontend_attached(be_pid, fe_pid).await;
+        }
 
         info!("Established backend streams for backend plugin [{}]. (3/3)", be_pid);
 
@@ -82,53 +97,171 @@ pub fn establish_backend_streams(
     handle
 }
 
-fn loop_backend_plugin_stream_read(mut read_half: ReadHalf<UnixStream>) {
+/// Tells a (possibly not yet connected) backend about a newly bound frontend. If the backend
+/// is not connected yet, the event is sent once it connects.
+pub fn notify_frontend_attached(be_pid: u32, fe_pid: u32) {
+    tokio::spawn(async move {
+        if get_write_stream_for(be_pid).await.is_some() {
+            salus_control::send_frontend_attached(be_pid, fe_pid).await;
+        }
+    });
+}
 
-    let read_loop = async move {
-        let mut message_frame_bytes: Vec<u8> = Vec::new();
-        let mut message_frame_size: usize = 0;
-        let mut buf = vec![0u8; 4096];
+fn invalid_data(msg: &str) -> std::io::Error {
+    std::io::Error::new(std::io::ErrorKind::InvalidData, msg.to_string())
+}
 
-        loop {
-            let tx = auxiliary_sender();
+/// Writes one complete frame (length prefix + body) while holding the stream lock, so frames
+/// of different sources never interleave byte-wise.
+async fn write_frame(be_pid: u32, frame: &PluginMessageFrame) -> std::io::Result<()> {
+    let enc_frame = frame.encode()?;
 
-            match read_half.read(&mut buf).await {
-                Ok(0) => {
-                    // EOF, peer closed the connection
-                    break;
-                }
-                Ok(n) => {
-                    let mut received_message_frame_bytes = &buf[..];
-                    // First read has the message frame length suffix which needs to be read
-                    if message_frame_bytes.len() == 0 {
-                        let size_bytes: [u8; 4] = buf[..4].try_into().unwrap();
-                        message_frame_size = u32::from_le_bytes(size_bytes) as usize;
+    let stream_mutex = get_write_stream_for(be_pid).await.ok_or(
+        std::io::Error::new(std::io::ErrorKind::NotFound, "invalid backend process id."))?;
 
-                        received_message_frame_bytes = &buf[4..];
-                    }
+    let mut out = Vec::with_capacity(4 + enc_frame.len());
+    out.extend_from_slice(&(enc_frame.len() as u32).to_le_bytes());
+    out.extend_from_slice(&enc_frame);
 
-                    let num_bytes_to_collect = message_frame_size - message_frame_bytes.len();
+    let mut stream = stream_mutex.lock().await;
+    stream.write_all(&out).await
+}
 
-                    if num_bytes_to_collect < received_message_frame_bytes.len() {
-                        received_message_frame_bytes = &received_message_frame_bytes[..num_bytes_to_collect];
-                    }
+/// Sends a framework-originated message to a backend. Fails with `InvalidData` if it does not
+/// fit into one frame (fragmenting towards the backend is not implemented yet).
+pub async fn send_to_backend(be_pid: u32, frontend_process_id: u32, channel: &str, payload: Vec<u8>) -> std::io::Result<()> {
+    write_frame(be_pid, &PluginMessageFrame {
+        frontend_process_id,
+        message_id: next_message_id(),
+        flags: 0,
+        logical_channel: channel.to_string(),
+        payload,
+    }).await
+}
 
-                    message_frame_bytes.extend(received_message_frame_bytes);
+struct PartialMessage {
+    channel: String,
+    data: Vec<u8>,
+    poisoned: bool,
+}
 
-                    if message_frame_bytes.len() == message_frame_size {
+type PartialMessages = HashMap<(u32, u32), PartialMessage>;
 
-                        tx.send(message_frame_bytes).await;
+/// Returns the complete message once its last fragment arrived.
+fn reassemble(partial: &mut PartialMessages, frame: PluginMessageFrame) -> Option<PluginMessageFrame> {
+    let key = (frame.frontend_process_id, frame.message_id);
+    let more = frame.flags & FLAG_MORE_FRAGMENTS != 0;
 
-                        message_frame_bytes = Vec::new();
-                        message_frame_size = 0;
-                    }
-                }
-                Err(e) => {
-                    eprintln!("read error: {e}");
-                    break;
-                }
+    if !more && !partial.contains_key(&key) {
+        return Some(frame);
+    }
+
+    let entry = partial.entry(key).or_insert_with(|| PartialMessage {
+        channel: frame.logical_channel.clone(),
+        data: Vec::new(),
+        poisoned: false,
+    });
+
+    if entry.channel != frame.logical_channel {
+        entry.poisoned = true;
+    }
+    if !entry.poisoned {
+        entry.data.extend_from_slice(&frame.payload);
+        if entry.data.len() > MAX_MESSAGE_SIZE {
+            entry.poisoned = true;
+            entry.data = Vec::new();
+        }
+    }
+
+    if more {
+        return None;
+    }
+
+    let entry = partial.remove(&key)?;
+    if entry.poisoned {
+        warn!("Dropping fragmented message {:?}: channel mismatch or size cap exceeded", key);
+        return None;
+    }
+    Some(PluginMessageFrame { flags: 0, payload: entry.data, ..frame })
+}
+
+async fn read_backend_frames(be_pid: u32, read_half: &mut ReadHalf<UnixStream>) -> std::io::Result<()> {
+    let mut partial = PartialMessages::new();
+
+    loop {
+        let mut len_bytes = [0u8; 4];
+        read_half.read_exact(&mut len_bytes).await?;
+        let len = u32::from_le_bytes(len_bytes) as usize;
+        if len > MAX_FRAME_SIZE {
+            return Err(invalid_data("frame exceeds 64 MiB"));
+        }
+
+        let mut body = vec![0u8; len];
+        read_half.read_exact(&mut body).await?;
+
+        let frame = match PluginMessageFrame::decode(&body) {
+            Ok(frame) => frame,
+            Err(e) => {
+                warn!("Backend [{}]: dropping invalid frame: {}", be_pid, e);
+                continue;
+            }
+        };
+
+        dispatch_backend_frame(be_pid, frame, body, &mut partial).await;
+    }
+}
+
+async fn dispatch_backend_frame(be_pid: u32, frame: PluginMessageFrame, raw_body: Vec<u8>, partial: &mut PartialMessages) {
+    let channel = frame.logical_channel.as_str();
+
+    if channel.starts_with(salus_control::SALUS_PREFIX) {
+        if let Some(message) = reassemble(partial, frame) {
+            // Own task so a slow reply never stalls reading from the backend.
+            tokio::spawn(salus_control::handle_backend_request(be_pid, message));
+        }
+    } else if channel.starts_with("http://") {
+        if let Some(message) = reassemble(partial, frame) {
+            http_gateway::handle_backend_frame(be_pid, message);
+        }
+    } else {
+        forward_to_frontends(be_pid, frame, raw_body).await;
+    }
+}
+
+/// `ws://` and unknown channels are forwarded unchanged to the target frontend (or all frontends
+/// bound to this backend for `ALL_FRONTENDS`).
+async fn forward_to_frontends(be_pid: u32, frame: PluginMessageFrame, raw_body: Vec<u8>) {
+    let tx = auxiliary_sender();
+
+    if frame.frontend_process_id == ALL_FRONTENDS {
+        for fe_pid in plugin_process_manager::get_frontends_for_backend(be_pid) {
+            let per_frontend = PluginMessageFrame { frontend_process_id: fe_pid, ..frame.clone() };
+            if let Ok(bytes) = per_frontend.encode() {
+                let _ = tx.send(bytes).await;
             }
         }
+        return;
+    }
+
+    if plugin_process_manager::get_be_pid_for_fe_pid(frame.frontend_process_id) != Some(be_pid) {
+        warn!("Backend [{}]: dropping frame for frontend {} that is not bound to it", be_pid, frame.frontend_process_id);
+        return;
+    }
+    let _ = tx.send(raw_body).await;
+}
+
+fn loop_backend_plugin_stream_read(be_pid: u32, mut read_half: ReadHalf<UnixStream>) {
+    let read_loop = async move {
+        match read_backend_frames(be_pid, &mut read_half).await {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => {
+                info!("Backend [{}] closed its connection.", be_pid);
+            }
+            Err(e) => warn!("Backend [{}] read error: {}", be_pid, e),
+        }
+
+        get_stream_writers().lock().await.remove(&be_pid);
+        http_gateway::backend_disconnected(be_pid);
     };
 
     tokio::spawn(read_loop);
@@ -171,18 +304,7 @@ pub async fn forward_message_to_backend(message: PluginMessageFrame) -> std::io:
         std::io::Error::new(std::io::ErrorKind::AddrNotAvailable, "no be_pid found for fe_pid")
     )?;
 
-    let enc_frame = message.encode()
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
-
-    let stream_mutex = get_write_stream_for(backend_pid).await.ok_or(
-        std::io::Error::new(std::io::ErrorKind::NotFound, "invalid backend process id."))?;
-    let mut stream = stream_mutex.lock().await;
-
-    let len = enc_frame.len() as u32;
-    stream.write_all(&len.to_le_bytes()).await?;
-    stream.write_all(&enc_frame).await?;
-
-    Ok(())
+    write_frame(backend_pid, &message).await
 }
 
 // pub fn register_plugin_backend_receiver()

@@ -130,6 +130,8 @@ pub fn spawn_frontend_plugin_process(plugin_id: u32, user: &User) -> u32 {
 
     frontend_processes().lock().unwrap().insert(fe_pid, frontend_process);
 
+    plugin_message_router::notify_frontend_attached(backend_pid, fe_pid);
+
     debug!("Frontend plugin process {} spawned for plugin {}.", fe_pid, plugin_id);
 
     fe_pid
@@ -141,4 +143,18 @@ pub fn get_be_pid_for_fe_pid(fe_pid: u32) -> Option<u32> {
         return None;
     };
     Some(frontend_process.backend_process_id)
+}
+
+pub fn get_frontend_owner(fe_pid: u32) -> Option<User> {
+    frontend_processes().lock().unwrap().get(&fe_pid).map(|fe| fe.owner.clone())
+}
+
+pub fn get_frontends_for_backend(be_pid: u32) -> Vec<u32> {
+    frontend_processes()
+        .lock()
+        .unwrap()
+        .values()
+        .filter(|fe| fe.backend_process_id == be_pid)
+        .map(|fe| fe.process_id)
+        .collect()
 }
