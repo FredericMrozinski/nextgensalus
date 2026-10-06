@@ -45,7 +45,7 @@ pub fn PluginPicker() -> Element {
                                 div {
                                     key: "{id}",
                                     class: "plugin-picker-item",
-                                    onclick: move |_| workspace.open_tab(Center, Plugin(id, description.clone())),
+                                    onclick: move |_| workspace.open_tab(workspace.plugin_picker_target().unwrap(), Plugin(id, description.clone())),
                                     "{description.name}"
                                 }
                             }

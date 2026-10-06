@@ -1,61 +1,25 @@
 use crate::models::Plugin;
-use crate::plugin_process_manager::{Listener};
 use crate::plugin_message_router::{Stream};
 use std::ffi::OsString;
 use std::fs;
 use std::io;
 use std::os::fd::AsRawFd;
-use tokio::net::UnixListener;
+use tokio::net::{UnixListener, UnixStream};
 use std::os::unix::process::CommandExt;
 use std::path::PathBuf;
 use std::process::{Child, Command};
 use std::sync::Arc;
-use dioxus::prelude::debug;
+use dioxus::prelude::*;
 use log::error;
 // TODO reimplement by hand. Now it's AI generated but I want to learn :)
 
 
-pub fn execute_plugin_backend_process(
-    plugin: &Plugin,
-    be_process_id: u32,
-) -> io::Result<(Child, Arc<dyn Listener>)> {
-    let tmp = PathBuf::from_iter([
-        &plugin.plugin_folder_name,
-        &plugin.manifest.backend_specs.entry_point_file_path,
-    ]);
-    let entrypoint = tmp.to_str().unwrap();
-
-    let path = socket_path(be_process_id);
-    let listener = match UnixListener::bind(&path) {
-        Ok(l) => l,
-        Err(e) => {
-            debug!("Could not bind Unix listener to path {}: {}", &path.display(), e.to_string());
-            return Err(e);
-        }
-    };
-
-    let mut cmd = Command::new(entrypoint);
-    cmd.arg(&path); // tell the spawned process where to connect
-
-    let child = spawn_tied(&mut cmd)?;
-
-    Ok((child, Arc::new(listener)))
+pub struct BackendPluginSocketHandle {
+    socket_listener: UnixListener,
+    socket_path: PathBuf,
 }
 
-// ============================================================================
-// Unix socket Listener implementation
-// ============================================================================
-
-fn socket_path(be_process_id: u32) -> PathBuf {
-    std::env::temp_dir().join(format!("plugin-{be_process_id}.sock"))
-}
-
-pub struct UnixSocketListener {
-    inner: UnixListener,
-    path: PathBuf,
-}
-
-impl UnixSocketListener {
+impl BackendPluginSocketHandle {
     pub fn bind(path: PathBuf) -> io::Result<Self> {
         // Best-effort cleanup of a stale socket file left behind by a
         // previous crash (SIGKILL/abort give us no chance to run Drop).
@@ -66,23 +30,60 @@ impl UnixSocketListener {
             fs::create_dir_all(parent)?;
         }
 
-        let inner = UnixListener::bind(&path)?;
-        Ok(Self { inner, path })
+        let listener = UnixListener::bind(&path)?;
+        Ok(Self {
+            socket_listener: listener,
+            socket_path: path
+        })
+    }
+
+    pub async fn accept(&self) -> io::Result<UnixStream> {
+        let (stream, _addr) = self.socket_listener.accept().await.unwrap();
+        Ok(stream)
+    }
+
+    pub fn drop(&mut self, path_buf: PathBuf) {
+        fs::remove_file(path_buf);
     }
 }
 
-#[async_trait::async_trait]
-impl Listener for UnixListener {
-    async fn accept(&self) -> io::Result<Box<dyn Stream>> {
-        let (stream, _addr) = self.accept().await.unwrap();
-        Ok(Box::new(stream))
-    }
+
+pub fn execute_plugin_backend_process(
+    plugin: &Plugin,
+    be_process_id: u32,
+) -> io::Result<(Child, BackendPluginSocketHandle)> {
+    let tmp = PathBuf::from_iter([
+        &plugin.plugin_folder_name,
+        &plugin.manifest.backend_specs.entry_point_file_path,
+    ]);
+    let entrypoint = tmp.to_str().unwrap();
+
+    let path = socket_path(be_process_id);
+
+    // TODO can bind just take a reference instead so we can remove clone?
+    let handle = match BackendPluginSocketHandle::bind(path.clone()) {
+        Ok(h) => h,
+        Err(e) => {
+            // TODO in this case, more should happen, like the plugin should display an error message
+            info!("Could not bind Unix listener to path {}: {}", &path.display(), e.to_string());
+            return Err(e);
+        }
+    };
+
+    let mut cmd = Command::new(entrypoint);
+    cmd.arg(&path); // tell the spawned process where to connect
+
+    let child = spawn_tied(&mut cmd)?;
+
+    Ok((child, handle))
 }
 
-impl Drop for UnixSocketListener {
-    fn drop(&mut self) {
-        let _ = fs::remove_file(&self.path);
-    }
+// ============================================================================
+// Unix socket Listener implementation
+// ============================================================================
+
+fn socket_path(be_process_id: u32) -> PathBuf {
+    std::env::temp_dir().join(format!("plugin-{be_process_id}.sock"))
 }
 
 // ============================================================================

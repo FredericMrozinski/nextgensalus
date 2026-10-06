@@ -46,13 +46,13 @@ pub struct Plugin {
     pub plugin_folder_name: String,
 }
 
-#[derive(PartialEq, Clone, Serialize, Deserialize, Debug)]
-pub struct PluginMessageFrame {
-    pub frontend_process_id: u32,
-    pub logical_channel: String,
-    #[serde(with = "serde_bytes")]
-    pub payload: Vec<u8>
-}
+// #[derive(PartialEq, Clone, Serialize, Deserialize, Debug)]
+// pub struct PluginMessageFrame {
+//     pub frontend_process_id: u32,
+//     pub logical_channel: String,
+//     #[serde(with = "serde_bytes")]
+//     pub payload: Vec<u8>
+// }
 
 #[derive(PartialEq, Clone, Serialize, Deserialize, Debug)]
 pub struct User {

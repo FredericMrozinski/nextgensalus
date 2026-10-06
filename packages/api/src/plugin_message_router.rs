@@ -1,25 +1,25 @@
 use std::io::Write;
-use crate::plugin_process_manager::{self, Listener};
+use crate::plugin_process_manager::{self};
+use crate::plugin_backend_executor::BackendPluginSocketHandle;
 use std::sync::{Arc, OnceLock};
 use tokio::sync::Mutex;
 use axum::extract::ws::{Message, WebSocketUpgrade};
 use axum::response::IntoResponse;
-use postcard::{from_bytes, to_allocvec};
-use dioxus::logger::tracing::*;
 use tokio::io::{ReadHalf, AsyncReadExt, WriteHalf, AsyncWriteExt, AsyncRead, AsyncWrite};
 use std::collections::HashMap;
 use dioxus::logger::tracing::field::debug;
 use dioxus::prelude::ReadableOptionExt;
 use futures_util::{sink::SinkExt, stream::StreamExt};
 use tokio::sync::mpsc::{Receiver, Sender};
-use crate::models::PluginMessageFrame;
+use tokio::task::JoinHandle;
+use crate::message_frame::PluginMessageFrame;
+use dioxus::prelude::*;
+use tokio::net::UnixStream;
 
 pub trait Stream: AsyncRead + AsyncWrite + Unpin + Send {}
 impl<T: AsyncRead + AsyncWrite + Unpin + Send> Stream for T {}
 
 // TODO replace my own Stream type by tokio's Stream type
-type LockedWriteHalfArc = Arc<Mutex<WriteHalf<Box<dyn Stream>>>>;
-
 static AUXILIARY_SENDER: OnceLock<Sender<Vec<u8>>> = OnceLock::new();
 static AUXILIARY_RECEIVER: OnceLock<Mutex<Receiver<Vec<u8>>>> = OnceLock::new();
 
@@ -43,24 +43,27 @@ pub fn auxiliary_receiver() -> &'static Mutex<Receiver<Vec<u8>>> {
 }
 
 // TODO replace all "dyn" by compile time traits
-fn get_stream_writers() -> &'static Mutex<HashMap<u32, LockedWriteHalfArc>> {
-    static WRITERS_FOR_PLUGIN: OnceLock<Mutex<HashMap<u32, LockedWriteHalfArc>>> = OnceLock::new();
+fn get_stream_writers() -> &'static Mutex<HashMap<u32, Arc<Mutex<WriteHalf<UnixStream>>>>> {
+    static WRITERS_FOR_PLUGIN: OnceLock<Mutex<HashMap<u32, Arc<Mutex<WriteHalf<UnixStream>>>>>> = OnceLock::new();
     WRITERS_FOR_PLUGIN.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-async fn get_write_stream_for(backend_pid: u32) -> Option<LockedWriteHalfArc> {
-    let write_stream = {
-        get_stream_writers().lock().await.get(&backend_pid)?.clone()
-    };
+async fn get_write_stream_for(backend_pid: u32) -> Option<Arc<Mutex<WriteHalf<UnixStream>>>> {
+    let write_stream = get_stream_writers().lock().await.get(&backend_pid)?.clone();
 
     Some(write_stream)
 }
 
-pub fn establish_backend_streams(be_pid: u32, listener_arc: Arc<dyn Listener>) {
+pub fn establish_backend_streams(
+    be_pid: u32,
+    socket_handle: BackendPluginSocketHandle
+) -> JoinHandle<BackendPluginSocketHandle> {
     let task = async move {
-        let stream = listener_arc.accept().await.unwrap();
+        info!("Waiting for plugin backend [{}] to connect to socket... (1/3)", be_pid); // TODO add socket details
 
-        debug!("Plugin backend connected to socket for {}. Establishing stream...", be_pid);
+        let stream = socket_handle.accept().await.unwrap();
+
+        info!("Plugin backend [{}] connected to socket. Establishing stream... (2/3)", be_pid);
 
         let (reader, writer) = tokio::io::split(stream);
 
@@ -70,13 +73,16 @@ pub fn establish_backend_streams(be_pid: u32, listener_arc: Arc<dyn Listener>) {
 
         loop_backend_plugin_stream_read(reader);
 
-        debug!("Established backend streams for {}.", be_pid);
+        info!("Established backend streams for backend plugin [{}]. (3/3)", be_pid);
+
+        socket_handle
     };
 
-    tokio::spawn(task);
+    let handle = tokio::spawn(task);
+    handle
 }
 
-fn loop_backend_plugin_stream_read(mut read_half: ReadHalf<Box<dyn Stream>>) {
+fn loop_backend_plugin_stream_read(mut read_half: ReadHalf<UnixStream>) {
 
     let read_loop = async move {
         let mut message_frame_bytes: Vec<u8> = Vec::new();
@@ -110,7 +116,7 @@ fn loop_backend_plugin_stream_read(mut read_half: ReadHalf<Box<dyn Stream>>) {
                     message_frame_bytes.extend(received_message_frame_bytes);
 
                     if message_frame_bytes.len() == message_frame_size {
-                        
+
                         tx.send(message_frame_bytes).await;
 
                         message_frame_bytes = Vec::new();
@@ -136,7 +142,7 @@ pub async fn plugin_stream(ws: WebSocketUpgrade) -> impl IntoResponse {
 
         let read_task = tokio::spawn(async move {
             while let Some(Ok(Message::Binary(frame))) = reader.next().await {
-                let Ok(dec_frame) = from_bytes::<PluginMessageFrame>(&frame) else {
+                let Ok(dec_frame) = PluginMessageFrame::decode(&frame) else {
                     continue;
                 };
 
@@ -165,7 +171,7 @@ pub async fn forward_message_to_backend(message: PluginMessageFrame) -> std::io:
         std::io::Error::new(std::io::ErrorKind::AddrNotAvailable, "no be_pid found for fe_pid")
     )?;
 
-    let enc_frame = to_allocvec(&message)
+    let enc_frame = message.encode()
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
 
     let stream_mutex = get_write_stream_for(backend_pid).await.ok_or(

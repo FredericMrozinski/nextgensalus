@@ -1,24 +1,20 @@
 use std::collections::HashMap;
 use std::io;
+use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
 use std::sync::atomic::{AtomicU32, Ordering};
 use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncRead, AsyncWrite, ReadHalf, WriteHalf};
 use crate::models::{Plugin, User, BackendLifetime};
 use crate::plugin_library;
-use crate::plugin_backend_executor;
+use crate::plugin_backend_executor::{self, BackendPluginSocketHandle};
 use std::process;
 use std::sync::Arc;
 use dioxus::html::KeyCode::P;
 use dioxus::prelude::debug;
-use crate::plugin_message_router;
-
-// TODO move the traits into the router
-
-#[async_trait::async_trait]
-pub trait Listener: Send + Sync {
-    async fn accept(&self) -> io::Result<Box<dyn plugin_message_router::Stream>>;
-}
+use tokio::task::JoinHandle;
+use tokio::net::UnixListener;
+use crate::plugin_message_router::{self, Stream};
 
 pub struct PluginFrontendProcess {
     pub plugin_id: u32,
@@ -32,7 +28,7 @@ pub struct PluginBackendProcess {
     pub process_id: u32,
     pub backend_lifetime: BackendLifetime,
     pub process: process::Child,
-    pub socket_accept_listener_arc: Arc<dyn Listener>,
+    pub socket_join_handle: JoinHandle<BackendPluginSocketHandle>,
 }
 
 fn get_next_frontend_pid() -> u32 {
@@ -52,6 +48,7 @@ fn frontend_processes() -> &'static Mutex<HashMap<u32, PluginFrontendProcess>> {
     FRONTEND_PROCESSES.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+// TODO Okay now the UnixListener is hardcoded which we tried to avoid. fix that
 fn backend_processes() -> &'static Mutex<HashMap<u32, PluginBackendProcess>> {
     static BACKEND_PROCESSES: OnceLock<Mutex<HashMap<u32, PluginBackendProcess>>> = OnceLock::new();
     BACKEND_PROCESSES.get_or_init(|| Mutex::new(HashMap::new()))
@@ -88,7 +85,7 @@ fn spawn_backend_plugin_process(plugin_id: u32) -> u32 {
 
     // TODO go through the entire code and replace those unwraps. They might be unsafe
 
-    let Ok((child_process, listener)) = plugin_backend_executor::execute_plugin_backend_process(
+    let Ok((child_process, socket_handle)) = plugin_backend_executor::execute_plugin_backend_process(
         &plugin_library::get_plugin_from_id(&plugin_id).unwrap(),
         be_pid,
     ) else {
@@ -96,20 +93,19 @@ fn spawn_backend_plugin_process(plugin_id: u32) -> u32 {
         return 0; // TODO return an error instead
     };
 
+    let socket_join_handle = plugin_message_router::establish_backend_streams(be_pid, socket_handle);
+
     let mut plugin_backend_process = PluginBackendProcess {
         plugin_id,
         process_id: be_pid,
         backend_lifetime: BackendLifetime::System(true), // TODO change and adapt!!
         process: child_process,
-        socket_accept_listener_arc: listener.clone()
+        socket_join_handle
     };
 
     backend_processes().lock().unwrap().insert(be_pid, plugin_backend_process);
 
     debug!("Backend plugin process {} spawned for plugin {}.", be_pid, plugin_id);
-    debug!("Accepting socket connections for {}.", be_pid);
-
-    plugin_message_router::establish_backend_streams(be_pid, listener);
 
     be_pid
 }

@@ -1,5 +1,4 @@
 #[allow(dead_code)]
-mod plugin_frame;
 mod frontend_communication_relay;
 mod workspace;
 

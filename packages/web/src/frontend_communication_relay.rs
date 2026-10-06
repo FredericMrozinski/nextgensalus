@@ -9,7 +9,7 @@ use futures::{StreamExt, SinkExt};
 use futures::channel::mpsc::unbounded;
 use postcard::{from_bytes, to_allocvec};
 use web_sys::HtmlIFrameElement;
-use api::models::PluginMessageFrame;
+use api::message_frame::PluginMessageFrame;
 
 // === Message definition
 pub fn init_plugin_bridge() {
@@ -66,26 +66,6 @@ async fn send_message_to_plugin(message_frame: PluginMessageFrame) {
     }
 }
 
-// async fn send_message_to_plugin(message_frame: MessageFrame) {
-//     // First, we serialize the message_frame, compatible for the WASM binding
-//     let ser_message = serde_wasm_bindgen::to_value(&message_frame).unwrap();
-//
-//     // Then we find the iframe to which the message should be sent
-//     let document = web_sys::window().unwrap().document().unwrap();
-//
-//     // TODO when a debugger is implemented in the future, this could be logged
-//     let Some(element) = document
-//         .get_element_by_id(&message_frame.plugin_id.to_string()) else {
-//         return;
-//     };
-//
-//     let iframe: HtmlIFrameElement = element.dyn_into().unwrap();
-//     let content_window = iframe.content_window().unwrap();
-//
-//     // Finally, send the message
-//     content_window.post_message(&ser_message, "*").unwrap();
-// }
-
 // === Forwarding to backend and directly
 fn run_socket_to_backend(mut plugin_salus_stream: UnboundedReceiver<PluginMessageFrame>) {
     let ws = WebSocket::open("/plugin-stream").unwrap();
@@ -94,7 +74,7 @@ fn run_socket_to_backend(mut plugin_salus_stream: UnboundedReceiver<PluginMessag
     // Encodes message from JS to byte-stream and forwards to backend
     let send_task = async move {
         while let Some(frame) = plugin_salus_stream.next().await {
-            let enc_frame = to_allocvec(&frame).unwrap();
+            let enc_frame = frame.encode().unwrap();
             write.send(Message::Bytes(enc_frame)).await.unwrap();
         }
     };
@@ -103,7 +83,7 @@ fn run_socket_to_backend(mut plugin_salus_stream: UnboundedReceiver<PluginMessag
     // Receives a message from backend and sends it to plugin frontend
     let recv_task = async move {
         while let Some(Ok(Message::Bytes(frame))) = read.next().await {
-            let dec_frame: PluginMessageFrame = from_bytes(&frame).unwrap();
+            let dec_frame = PluginMessageFrame::decode(&frame).unwrap();
             spawn(send_message_to_plugin(dec_frame));
         }
     };

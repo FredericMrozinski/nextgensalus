@@ -85,13 +85,11 @@ pub fn PluginFrame(plugin_id: u32) -> Element {
                                 let fe_entrypoint = tmp.to_str().unwrap();
 
                                 rsx! {
-                                    div { "{fe_entrypoint}" }
-
                                     iframe {
                                         id: pid,
                                         src: "/plugins/{fe_entrypoint}?fe_process_id={pid}",
                                         width: "100%",
-                                        height: "800px",
+                                        height: "100%",
                                         style: "border: none;",
                                     }
                                 }

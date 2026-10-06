@@ -29,6 +29,7 @@ pub mod framework_web_api;
 
 #[cfg(feature = "server")]
 mod plugin_backend_executor;
+pub mod message_frame;
 
 use dioxus::prelude::*;
 
