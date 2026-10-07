@@ -82,6 +82,10 @@ pub fn execute_plugin_backend_process(
 // Unix socket Listener implementation
 // ============================================================================
 
+pub fn remove_socket_file(be_process_id: u32) {
+    let _ = fs::remove_file(socket_path(be_process_id));
+}
+
 fn socket_path(be_process_id: u32) -> PathBuf {
     std::env::temp_dir().join(format!("plugin-{be_process_id}.sock"))
 }

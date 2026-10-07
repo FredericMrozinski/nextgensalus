@@ -3,17 +3,13 @@ use crate::plugin_process_manager::{self};
 use crate::plugin_backend_executor::BackendPluginSocketHandle;
 use std::sync::{Arc, OnceLock};
 use tokio::sync::Mutex;
-use axum::extract::ws::{Message, WebSocketUpgrade};
-use axum::response::IntoResponse;
 use tokio::io::{ReadHalf, AsyncReadExt, WriteHalf, AsyncWriteExt, AsyncRead, AsyncWrite};
 use std::collections::HashMap;
 use dioxus::logger::tracing::field::debug;
 use dioxus::prelude::ReadableOptionExt;
-use futures_util::{sink::SinkExt, stream::StreamExt};
-use tokio::sync::mpsc::{Receiver, Sender};
 use tokio::task::JoinHandle;
 use crate::message_frame::{PluginMessageFrame, ALL_FRONTENDS, FLAG_MORE_FRAGMENTS, MAX_FRAME_SIZE};
-use crate::{http_gateway, salus_control};
+use crate::{browser_connections, http_gateway, salus_control};
 use std::sync::atomic::{AtomicU32, Ordering};
 use dioxus::prelude::*;
 use tokio::net::UnixStream;
@@ -23,29 +19,6 @@ const MAX_MESSAGE_SIZE: usize = 1024 * 1024 * 1024;
 
 pub trait Stream: AsyncRead + AsyncWrite + Unpin + Send {}
 impl<T: AsyncRead + AsyncWrite + Unpin + Send> Stream for T {}
-
-// TODO replace my own Stream type by tokio's Stream type
-static AUXILIARY_SENDER: OnceLock<Sender<Vec<u8>>> = OnceLock::new();
-static AUXILIARY_RECEIVER: OnceLock<Mutex<Receiver<Vec<u8>>>> = OnceLock::new();
-
-fn init_auxiliary_channel() -> &'static Sender<Vec<u8>> {
-    AUXILIARY_SENDER.get_or_init(|| {
-        let (tx, rx) = tokio::sync::mpsc::channel::<Vec<u8>>(32);
-        AUXILIARY_RECEIVER.set(Mutex::new(rx))
-            .unwrap_or_else(|_| panic!("channel already initialized"));
-        tx
-    })
-}
-
-pub fn auxiliary_sender() -> &'static Sender<Vec<u8>> {
-    init_auxiliary_channel()
-}
-
-pub fn auxiliary_receiver() -> &'static Mutex<Receiver<Vec<u8>>> {
-    // ensure init has run, then hand back the receiver lock
-    init_auxiliary_channel();
-    AUXILIARY_RECEIVER.get().expect("channel initialized")
-}
 
 // TODO replace all "dyn" by compile time traits
 fn get_stream_writers() -> &'static Mutex<HashMap<u32, Arc<Mutex<WriteHalf<UnixStream>>>>> {
@@ -57,6 +30,16 @@ async fn get_write_stream_for(backend_pid: u32) -> Option<Arc<Mutex<WriteHalf<Un
     let write_stream = get_stream_writers().lock().await.get(&backend_pid)?.clone();
 
     Some(write_stream)
+}
+
+fn connected_since() -> &'static std::sync::Mutex<HashMap<u32, std::time::Instant>> {
+    static CONNECTED_SINCE: OnceLock<std::sync::Mutex<HashMap<u32, std::time::Instant>>> = OnceLock::new();
+    CONNECTED_SINCE.get_or_init(|| std::sync::Mutex::new(HashMap::new()))
+}
+
+/// When the backend's socket connection was established; `None` while it is not connected.
+pub fn backend_connected_since(be_pid: u32) -> Option<std::time::Instant> {
+    connected_since().lock().unwrap().get(&be_pid).copied()
 }
 
 fn next_message_id() -> u32 {
@@ -80,6 +63,7 @@ pub fn establish_backend_streams(
         let arc_mutex_writer = Arc::new(Mutex::new(writer));
 
         get_stream_writers().lock().await.insert(be_pid, arc_mutex_writer);
+        connected_since().lock().unwrap().insert(be_pid, std::time::Instant::now());
 
         loop_backend_plugin_stream_read(be_pid, reader);
 
@@ -105,6 +89,20 @@ pub fn notify_frontend_attached(be_pid: u32, fe_pid: u32) {
             salus_control::send_frontend_attached(be_pid, fe_pid).await;
         }
     });
+}
+
+/// Tells a connected backend that a frontend went away.
+pub async fn notify_frontend_detached(be_pid: u32, fe_pid: u32, component: &str) {
+    if get_write_stream_for(be_pid).await.is_some() {
+        salus_control::send_frontend_detached(be_pid, fe_pid, component).await;
+    }
+}
+
+/// Closes our end of a backend's connection. The SDK takes that as the signal to shut down.
+pub async fn close_backend_connection(be_pid: u32) {
+    if let Some(writer) = get_write_stream_for(be_pid).await {
+        let _ = writer.lock().await.shutdown().await;
+    }
 }
 
 fn invalid_data(msg: &str) -> std::io::Error {
@@ -207,11 +205,11 @@ async fn read_backend_frames(be_pid: u32, read_half: &mut ReadHalf<UnixStream>) 
             }
         };
 
-        dispatch_backend_frame(be_pid, frame, body, &mut partial).await;
+        dispatch_backend_frame(be_pid, frame, &mut partial).await;
     }
 }
 
-async fn dispatch_backend_frame(be_pid: u32, frame: PluginMessageFrame, raw_body: Vec<u8>, partial: &mut PartialMessages) {
+async fn dispatch_backend_frame(be_pid: u32, frame: PluginMessageFrame, partial: &mut PartialMessages) {
     let channel = frame.logical_channel.as_str();
 
     if channel.starts_with(salus_control::SALUS_PREFIX) {
@@ -224,21 +222,16 @@ async fn dispatch_backend_frame(be_pid: u32, frame: PluginMessageFrame, raw_body
             http_gateway::handle_backend_frame(be_pid, message);
         }
     } else {
-        forward_to_frontends(be_pid, frame, raw_body).await;
+        forward_to_frontends(be_pid, frame).await;
     }
 }
 
 /// `ws://` and unknown channels are forwarded unchanged to the target frontend (or all frontends
 /// bound to this backend for `ALL_FRONTENDS`).
-async fn forward_to_frontends(be_pid: u32, frame: PluginMessageFrame, raw_body: Vec<u8>) {
-    let tx = auxiliary_sender();
-
+async fn forward_to_frontends(be_pid: u32, frame: PluginMessageFrame) {
     if frame.frontend_process_id == ALL_FRONTENDS {
         for fe_pid in plugin_process_manager::get_frontends_for_backend(be_pid) {
-            let per_frontend = PluginMessageFrame { frontend_process_id: fe_pid, ..frame.clone() };
-            if let Ok(bytes) = per_frontend.encode() {
-                let _ = tx.send(bytes).await;
-            }
+            browser_connections::deliver_to_frontend(&PluginMessageFrame { frontend_process_id: fe_pid, ..frame.clone() });
         }
         return;
     }
@@ -247,7 +240,7 @@ async fn forward_to_frontends(be_pid: u32, frame: PluginMessageFrame, raw_body: 
         warn!("Backend [{}]: dropping frame for frontend {} that is not bound to it", be_pid, frame.frontend_process_id);
         return;
     }
-    let _ = tx.send(raw_body).await;
+    browser_connections::deliver_to_frontend(&frame);
 }
 
 fn loop_backend_plugin_stream_read(be_pid: u32, mut read_half: ReadHalf<UnixStream>) {
@@ -261,39 +254,11 @@ fn loop_backend_plugin_stream_read(be_pid: u32, mut read_half: ReadHalf<UnixStre
         }
 
         get_stream_writers().lock().await.remove(&be_pid);
+        connected_since().lock().unwrap().remove(&be_pid);
         http_gateway::backend_disconnected(be_pid);
     };
 
     tokio::spawn(read_loop);
-}
-
-// TODO rename this function
-pub async fn plugin_stream(ws: WebSocketUpgrade) -> impl IntoResponse {
-    ws.on_upgrade(|mut socket| async move {
-
-        let (mut writer, mut reader) = socket.split();
-
-        let read_task = tokio::spawn(async move {
-            while let Some(Ok(Message::Binary(frame))) = reader.next().await {
-                let Ok(dec_frame) = PluginMessageFrame::decode(&frame) else {
-                    continue;
-                };
-
-                forward_message_to_backend(dec_frame).await;
-            }
-        });
-
-        let mut rx = auxiliary_receiver().lock().await;
-        let write_task = tokio::spawn(async move {
-            while let Some(bytes) = rx.recv().await {
-                debug!("Received bytes to forward: {:?}", bytes);
-
-                if writer.send(Message::Binary(bytes.into())).await.is_err() {
-                    break;
-                }
-            }
-        });
-    })
 }
 
 pub async fn forward_message_to_backend(message: PluginMessageFrame) -> std::io::Result<()> {

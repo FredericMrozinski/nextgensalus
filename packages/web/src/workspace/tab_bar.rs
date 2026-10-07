@@ -1,4 +1,6 @@
 use super::state::{PanelId, TabId, WorkspaceState};
+use api::framework_web_api;
+use dioxus::core::spawn_forever;
 use dioxus::prelude::*;
 
 /// Row of tabs for one panel, plus the "new tab" button. Mirrors a browser's
@@ -47,7 +49,13 @@ fn TabButton(panel_id: PanelId, tab_id: TabId, title: String, active: bool) -> E
                 title: "Close tab",
                 onclick: move |evt| {
                     evt.stop_propagation();
-                    workspace.close_tab(panel_id, tab_id);
+                    if let Some(frontend_process_id) = workspace.close_tab(panel_id, tab_id) {
+                        // The plugin page is gone: let the server close its process (and a `panel` backend with the last one).
+                        // Not tied to this button: it disappears together with the tab, which would cancel the request.
+                        spawn_forever(async move {
+                            let _ = framework_web_api::close_frontend_process(frontend_process_id).await;
+                        });
+                    }
                 },
                 "×"
             }

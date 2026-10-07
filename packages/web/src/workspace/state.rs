@@ -1,6 +1,9 @@
 use dioxus::prelude::*;
 use std::collections::HashMap;
-use api::models::PluginDescription;
+use api::models::{FileViewer, SpawnedComponent, TargetPanel};
+use futures::channel::oneshot;
+use std::cell::RefCell;
+use std::rc::Rc;
 
 /// The four fixed slots that make up the workspace shell.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -9,6 +12,17 @@ pub enum PanelId {
     Center,
     Right,
     Bottom,
+}
+
+impl From<TargetPanel> for PanelId {
+    fn from(panel: TargetPanel) -> Self {
+        match panel {
+            TargetPanel::Left => PanelId::Left,
+            TargetPanel::Center => PanelId::Center,
+            TargetPanel::Right => PanelId::Right,
+            TargetPanel::Bottom => PanelId::Bottom,
+        }
+    }
 }
 
 impl PanelId {
@@ -25,19 +39,70 @@ impl TabId {
     }
 }
 
-/// What a tab renders. New plugin kinds are added here as variants; the
-/// panel/tab-bar machinery never needs to change to support them.
+/// What a tab renders. New kinds are added here as variants; the panel/tab-bar machinery never
+/// needs to change to support them.
 #[derive(Debug, Clone, PartialEq)]
 pub enum TabContent {
     SamplePlugin,
-    Plugin(u32, PluginDescription),
+    /// A frontend component of a plugin. Its frontend process already exists.
+    Component(SpawnedComponent),
 }
 
 impl TabContent {
     fn default_title(&self) -> String {
         match self {
             TabContent::SamplePlugin => String::from("Sample Plugin"),
-            TabContent::Plugin(_id, description) => description.name.clone(),
+            TabContent::Component(component) => component.title.clone(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Theme {
+    Dark,
+    Light,
+}
+
+impl Theme {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Theme::Dark => "dark",
+            Theme::Light => "light",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "dark" => Some(Theme::Dark),
+            "light" => Some(Theme::Light),
+            _ => None,
+        }
+    }
+
+    pub fn toggled(self) -> Self {
+        match self {
+            Theme::Dark => Theme::Light,
+            Theme::Light => Theme::Dark,
+        }
+    }
+}
+
+/// A plugin asked to open a file for which several viewers exist; the user picks one.
+#[derive(Clone)]
+pub struct ViewerPickerRequest {
+    pub file: String,
+    pub viewers: Vec<FileViewer>,
+    reply: Rc<RefCell<Option<oneshot::Sender<Option<FileViewer>>>>>,
+}
+
+impl ViewerPickerRequest {
+    pub fn new(file: String, viewers: Vec<FileViewer>, reply: oneshot::Sender<Option<FileViewer>>) -> Self {
+        Self { file, viewers, reply: Rc::new(RefCell::new(Some(reply))) }
+    }
+
+    fn answer(&self, choice: Option<FileViewer>) {
+        if let Some(reply) = self.reply.borrow_mut().take() {
+            let _ = reply.send(choice);
         }
     }
 }
@@ -79,6 +144,8 @@ pub struct WorkspaceState {
     /// Kept per-panel (rather than a bare bool) so a future version can open
     /// the chosen plugin directly into the panel that requested it.
     plugin_picker_target: Signal<Option<PanelId>>,
+    theme: Signal<Theme>,
+    viewer_picker: Signal<Option<ViewerPickerRequest>>,
 }
 
 impl WorkspaceState {
@@ -95,6 +162,8 @@ impl WorkspaceState {
             right_width: Signal::new(DEFAULT_RIGHT_WIDTH),
             bottom_height: Signal::new(DEFAULT_BOTTOM_HEIGHT),
             plugin_picker_target: Signal::new(None),
+            theme: Signal::new(Theme::Dark),
+            viewer_picker: Signal::new(None),
         }
     }
 
@@ -145,16 +214,14 @@ impl WorkspaceState {
         self.activate_tab(panel_id, id);
     }
 
-    pub fn close_tab(&self, panel_id: PanelId, tab_id: TabId) {
+    /// Removes a tab. Returns the frontend process id when the tab showed a plugin component (the caller
+    /// tells the server, which closes the process).
+    pub fn close_tab(&self, panel_id: PanelId, tab_id: TabId) -> Option<u32> {
         let mut panels = self.panels;
         let mut panels = panels.write();
-        let Some(panel) = panels.get_mut(&panel_id) else {
-            return;
-        };
-        let Some(pos) = panel.tabs.iter().position(|tab| tab.id == tab_id) else {
-            return;
-        };
-        panel.tabs.remove(pos);
+        let panel = panels.get_mut(&panel_id)?;
+        let pos = panel.tabs.iter().position(|tab| tab.id == tab_id)?;
+        let removed = panel.tabs.remove(pos);
 
         if panel.active == Some(tab_id) {
             // Prefer the tab that slid into this slot; fall back to the one before it.
@@ -163,6 +230,11 @@ impl WorkspaceState {
                 .get(pos)
                 .or_else(|| pos.checked_sub(1).and_then(|i| panel.tabs.get(i)))
                 .map(|tab| tab.id);
+        }
+
+        match removed.content {
+            TabContent::Component(component) => Some(component.frontend_process_id),
+            TabContent::SamplePlugin => None,
         }
     }
 
@@ -194,6 +266,49 @@ impl WorkspaceState {
         let mut height = self.bottom_height;
         let next = (*height.read() - delta_y).clamp(MIN_BOTTOM_HEIGHT, MAX_BOTTOM_HEIGHT);
         height.set(next);
+    }
+
+    /// Activates the tab that shows the given frontend process. Returns whether one was found.
+    pub fn focus_frontend(&self, frontend_process_id: u32) -> bool {
+        let mut panels = self.panels;
+        let mut panels = panels.write();
+        for panel in panels.values_mut() {
+            let found = panel.tabs.iter().find(|tab| {
+                matches!(&tab.content, TabContent::Component(c) if c.frontend_process_id == frontend_process_id)
+            });
+            if let Some(tab) = found {
+                panel.active = Some(tab.id);
+                return true;
+            }
+        }
+        false
+    }
+
+    pub fn theme(&self) -> Theme {
+        *self.theme.read()
+    }
+
+    pub fn set_theme(&self, theme: Theme) {
+        let mut signal = self.theme;
+        signal.set(theme);
+    }
+
+    pub fn viewer_picker(&self) -> Option<ViewerPickerRequest> {
+        self.viewer_picker.read().clone()
+    }
+
+    pub fn show_viewer_picker(&self, request: ViewerPickerRequest) {
+        let mut signal = self.viewer_picker;
+        signal.set(Some(request));
+    }
+
+    /// Answers the pending viewer picker (None = cancelled) and closes it.
+    pub fn resolve_viewer_picker(&self, choice: Option<FileViewer>) {
+        let mut signal = self.viewer_picker;
+        let request = signal.write().take();
+        if let Some(request) = request {
+            request.answer(choice);
+        }
     }
 
     pub fn plugin_picker_target(&self) -> Option<PanelId> {

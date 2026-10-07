@@ -1,13 +1,9 @@
-use super::state::WorkspaceState;
+use super::state::{TabContent, WorkspaceState};
 use api::framework_web_api;
 use dioxus::prelude::*;
-use crate::workspace::state::PanelId::Center;
-use crate::workspace::state::TabContent::Plugin;
 
-/// Shown when a panel's "+" button is pressed. Lists whatever
-/// `get_available_plugins` currently reports — nothing is clickable yet,
-/// this only surfaces what's there. Rendered centered on screen for now;
-/// where it actually belongs in the workspace is still undecided.
+/// Shown when a panel's "+" button is pressed. Lists the plugins that name an entry component
+/// (`get_available_plugins`); picking one opens that component in the panel that was clicked.
 #[component]
 pub fn PluginPicker() -> Element {
     let workspace = use_context::<WorkspaceState>();
@@ -45,7 +41,18 @@ pub fn PluginPicker() -> Element {
                                 div {
                                     key: "{id}",
                                     class: "plugin-picker-item",
-                                    onclick: move |_| workspace.open_tab(workspace.plugin_picker_target().unwrap(), Plugin(id, description.clone())),
+                                    onclick: move |_| {
+                                        let Some(panel) = workspace.plugin_picker_target() else { return };
+                                        spawn(async move {
+                                            match framework_web_api::open_plugin(id, Some(crate::frontend_communication_relay::page_id())).await {
+                                                Ok(component) => {
+                                                    workspace.open_tab(panel, TabContent::Component(component));
+                                                    workspace.close_plugin_picker();
+                                                }
+                                                Err(err) => error!("Could not open the plugin: {err}"),
+                                            }
+                                        });
+                                    },
                                     "{description.name}"
                                 }
                             }

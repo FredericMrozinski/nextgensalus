@@ -1,0 +1,20 @@
+[description]
+name = "Image Viewer"
+developer = "Salus Organization"
+description = "Shows a whole slide image with OpenSeadragon. Opens slide files that other plugins ask Salus to open."
+contact = "frederic.mrozinski@tum.de"
+version = "0.1.0"
+
+[meta]
+api-version = 3
+
+[backend]
+entrypoint = "backend/run.sh"
+lifetime = "session"
+
+[[frontend-component]]
+component-name = "main"
+title = "Image"
+entrypoint = "frontend/index.html"
+target-panel = "center"
+file_viewer_for = ["svs", "tif", "tiff", "ndpi", "scn", "mrxs", "vms", "vmu", "bif"]

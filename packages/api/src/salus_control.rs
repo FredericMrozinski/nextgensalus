@@ -4,37 +4,13 @@
 use crate::http_gateway;
 use crate::message_frame::{PluginMessageFrame, NO_FRONTEND};
 use crate::plugin_message_router;
+use crate::plugin_process_manager;
 use dioxus::logger::tracing::warn;
-use serde_json::{json, Map, Value};
+use serde_json::json;
 
 pub const SALUS_PREFIX: &str = "salus://";
 
-pub type Meta = Map<String, Value>;
-
-/// `u32 meta_len | meta (JSON object) | body`
-pub fn pack_meta(meta: &Value, body: &[u8]) -> Vec<u8> {
-    let json = serde_json::to_vec(meta).expect("serializing a JSON value cannot fail");
-    let mut out = Vec::with_capacity(4 + json.len() + body.len());
-    out.extend_from_slice(&(json.len() as u32).to_le_bytes());
-    out.extend_from_slice(&json);
-    out.extend_from_slice(body);
-    out
-}
-
-pub fn unpack_meta(payload: &[u8]) -> Result<(Meta, &[u8]), String> {
-    if payload.len() < 4 {
-        return Err("payload shorter than meta length prefix".into());
-    }
-    let meta_len = u32::from_le_bytes(payload[0..4].try_into().unwrap()) as usize;
-    let end = 4usize
-        .checked_add(meta_len)
-        .filter(|end| *end <= payload.len())
-        .ok_or("meta runs past end of payload")?;
-    match serde_json::from_slice::<Value>(&payload[4..end]).map_err(|e| e.to_string())? {
-        Value::Object(meta) => Ok((meta, &payload[end..])),
-        _ => Err("meta is not a JSON object".into()),
-    }
-}
+pub use crate::message_frame::{pack_meta, unpack_meta, Meta};
 
 /// Handles a (reassembled) `salus://<topic>` request from a backend and always replies
 /// as long as the request carries an `id`.
@@ -87,11 +63,26 @@ pub async fn send_frontend_attached(be_pid: u32, fe_pid: u32) {
         be_pid,
         fe_pid,
         &channel,
-        pack_meta(&json!({}), &[]),
+        // The backend learns which of the plugin's frontend components attached.
+        pack_meta(&json!({ "component": plugin_process_manager::get_frontend_component(fe_pid).unwrap_or_default() }), &[]),
     )
     .await
     {
         warn!("Backend [{be_pid}]: failed to send attached event for frontend {fe_pid}: {e}");
+    }
+}
+
+pub async fn send_frontend_detached(be_pid: u32, fe_pid: u32, component: &str) {
+    let channel = format!("{SALUS_PREFIX}frontend/detached");
+    if let Err(e) = plugin_message_router::send_to_backend(
+        be_pid,
+        fe_pid,
+        &channel,
+        pack_meta(&json!({ "component": component }), &[]),
+    )
+    .await
+    {
+        warn!("Backend [{be_pid}]: failed to send detached event for frontend {fe_pid}: {e}");
     }
 }
 

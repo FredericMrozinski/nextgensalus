@@ -29,6 +29,9 @@ mod plugin_message_router;
 mod salus_control;
 
 #[cfg(feature = "server")]
+mod browser_connections;
+
+#[cfg(feature = "server")]
 mod http_gateway;
 
 pub mod framework_web_api;
@@ -57,11 +60,24 @@ pub fn run_server(app: fn() -> Element) {
             .layer(axum::extract::DefaultBodyLimit::max(32 * 1024 * 1024));
 
         let router = dioxus::server::router(app)
+            .route("/salus/theme.css", routing::get(theme_css))
             .nest("/plugins", protected_pfe_asset_fetcher)
             .merge(plugin_api)
-            .route("/plugin-stream", routing::get(plugin_message_router::plugin_stream))
+            .route("/plugin-stream", routing::get(browser_connections::plugin_stream))
             .route("/dev/login", routing::get(session_manager::dev_login)); // TODO remove the dev/login
 
         Ok(router)
     });
+}
+
+/// The theme stylesheet Salus injects into plugin frontends (and uses for its own workspace).
+#[cfg(feature = "server")]
+async fn theme_css() -> impl axum::response::IntoResponse {
+    (
+        [
+            (axum::http::header::CONTENT_TYPE, "text/css; charset=utf-8"),
+            (axum::http::header::CACHE_CONTROL, "no-cache"),
+        ],
+        include_str!("theme.css"),
+    )
 }

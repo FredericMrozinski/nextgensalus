@@ -1,0 +1,90 @@
+site_name: Salus plugin developer docs
+site_description: How to build plugins for the Salus framework.
+docs_dir: docs
+strict: true
+
+theme:
+  name: material
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.top
+    - navigation.footer
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.tabs.link
+    - toc.follow
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets:
+      base_path: ["."]
+      check_paths: true
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [sdk/python]
+          options:
+            show_source: false
+            show_root_heading: true
+            show_root_full_path: false
+            heading_level: 3
+            members_order: source
+            docstring_style: google
+            show_signature_annotations: true
+            separate_signature: true
+
+nav:
+  - Home: index.md
+  - Getting started:
+      - Quickstart: getting-started/quickstart.md
+      - Plugin anatomy: getting-started/plugin-anatomy.md
+  - Concepts:
+      - How it fits together: concepts/architecture.md
+      - Security and limits: concepts/security-and-limits.md
+  - Guides:
+      - Python backend: guides/backend.md
+      - JavaScript frontend: guides/frontend.md
+      - Frontend components: guides/components.md
+      - File viewers: guides/file-viewers.md
+      - Theming: guides/theming.md
+      - HTTP routes: guides/http.md
+      - Payloads: guides/payloads.md
+      - Plugin dependencies: guides/dependencies.md
+      - "Tutorial: a whole slide viewer": guides/image-viewer.md
+  - Reference:
+      - Manifest: reference/manifest.md
+      - Python SDK: reference/python-sdk.md
+      - JavaScript SDK: reference/javascript-sdk.md
+      - Wire protocol: reference/protocol.md

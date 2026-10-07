@@ -26,3 +26,9 @@ pub async fn session_valid(cookie_jar: CookieJar) -> bool {
     }
     false   
 }
+
+/// The user a request's session cookie belongs to, if the session is valid.
+pub fn user_id_from_jar(cookie_jar: &CookieJar) -> Option<u32> {
+    let session_id = cookie_jar.get("session_id")?.value().parse::<u32>().ok()?;
+    get_user_id_from_session(session_id).ok()
+}

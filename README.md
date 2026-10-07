@@ -73,3 +73,13 @@ and serve:
 dx serve
 ```
 
+
+## Documentation
+
+The plugin developer documentation is a [MkDocs](https://www.mkdocs.org/) site (Material theme) in `docs/`, configured by `mkdocs.yml`. The Python SDK reference is generated from `sdk/python/salus_sdk.py`.
+
+```sh
+python3 -m venv .venv-docs && .venv-docs/bin/pip install -r requirements-docs.txt
+.venv-docs/bin/mkdocs serve          # live preview at http://127.0.0.1:8000
+.venv-docs/bin/mkdocs build --strict # static site in site/, fails on broken links
+```

@@ -1,0 +1,141 @@
+/*
+ * Salus theme for plugin frontends.
+ *
+ * Salus injects this stylesheet into every plugin page and sets data-theme="dark" or "light" on its
+ * <html> element, and switches it when the user changes the theme. Use the variables in your own CSS,
+ * e.g.  background: var(--salus-surface);  and your plugin follows the theme without any code.
+ *
+ * Everything below is in a cascade layer, so ANY unlayered CSS of a plugin overrides it.
+ */
+@layer salus-base {
+  :root,
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --salus-bg: #14161b;
+    --salus-surface: #1b1e25;
+    --salus-surface-alt: #191c22;
+    --salus-surface-2: #23262e;
+    --salus-surface-3: #33373f;
+    --salus-border: #2a2d35;
+    --salus-fg: #e6e6e6;
+    --salus-fg-muted: #a9adba;
+    --salus-fg-faint: #5c616e;
+    --salus-accent: #3a6df0;
+    --salus-accent-fg: #ffffff;
+    --salus-danger: #ff6369;
+    --salus-warning: #f5a524;
+    --salus-success: #4cc38a;
+    --salus-overlay: rgba(8, 9, 12, 0.5);
+    --salus-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+  }
+
+  :root[data-theme="light"] {
+    color-scheme: light;
+    --salus-bg: #eceef2;
+    --salus-surface: #ffffff;
+    --salus-surface-alt: #f3f4f7;
+    --salus-surface-2: #e8ebf0;
+    --salus-surface-3: #d8dce4;
+    --salus-border: #d3d7df;
+    --salus-fg: #1b1e25;
+    --salus-fg-muted: #4d5361;
+    --salus-fg-faint: #8a90a0;
+    --salus-accent: #2f5fd6;
+    --salus-accent-fg: #ffffff;
+    --salus-danger: #c9302c;
+    --salus-warning: #b86e00;
+    --salus-success: #1a7f4b;
+    --salus-overlay: rgba(30, 34, 44, 0.35);
+    --salus-shadow: 0 12px 32px rgba(30, 34, 44, 0.2);
+  }
+
+  :root {
+    --salus-radius: 6px;
+    --salus-space-1: 4px;
+    --salus-space-2: 8px;
+    --salus-space-3: 12px;
+    --salus-space-4: 16px;
+    --salus-font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --salus-font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    --salus-font-size: 13px;
+  }
+
+  html {
+    background: var(--salus-bg);
+  }
+
+  body {
+    margin: 0;
+    background: var(--salus-bg);
+    color: var(--salus-fg);
+    font-family: var(--salus-font);
+    font-size: var(--salus-font-size);
+    line-height: 1.45;
+  }
+
+  *, *::before, *::after {
+    box-sizing: border-box;
+  }
+
+  a {
+    color: var(--salus-accent);
+  }
+
+  h1, h2, h3, h4 {
+    margin: 0 0 var(--salus-space-2);
+    line-height: 1.25;
+  }
+
+  code, pre, kbd {
+    font-family: var(--salus-font-mono);
+  }
+
+  hr {
+    border: 0;
+    border-top: 1px solid var(--salus-border);
+  }
+
+  button, input, select, textarea {
+    font: inherit;
+    color: var(--salus-fg);
+  }
+
+  button {
+    padding: var(--salus-space-1) var(--salus-space-3);
+    background: var(--salus-surface-2);
+    border: 1px solid var(--salus-border);
+    border-radius: var(--salus-radius);
+    cursor: pointer;
+  }
+
+  button:hover:not(:disabled) {
+    background: var(--salus-surface-3);
+  }
+
+  button:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+
+  input, select, textarea {
+    padding: var(--salus-space-1) var(--salus-space-2);
+    background: var(--salus-surface);
+    border: 1px solid var(--salus-border);
+    border-radius: var(--salus-radius);
+  }
+
+  input:focus-visible, select:focus-visible, textarea:focus-visible, button:focus-visible {
+    outline: 2px solid var(--salus-accent);
+    outline-offset: 1px;
+  }
+
+  table {
+    border-collapse: collapse;
+  }
+
+  th, td {
+    padding: var(--salus-space-1) var(--salus-space-2);
+    border-bottom: 1px solid var(--salus-border);
+    text-align: left;
+  }
+}

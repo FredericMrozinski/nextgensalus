@@ -1,0 +1,18 @@
+[description]
+name = "Image Controls"
+developer = "Salus Organization"
+description = "Zoom and move buttons that steer the Image Viewer that opened it."
+contact = "frederic.mrozinski@tum.de"
+version = "0.0.1"
+
+[meta]
+api-version = 3
+
+[backend]
+entrypoint = "backend/plugin.py"
+lifetime = "session"
+
+[[frontend-component]]
+component-name = "main"
+entrypoint = "frontend/index.html"
+target-panel = "bottom"

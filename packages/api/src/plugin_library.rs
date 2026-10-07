@@ -4,7 +4,7 @@ use crate::plugin_loader;
 use std::sync::{Mutex, OnceLock};
 use dioxus::logger::tracing::field::debug;
 use dioxus::prelude::*;
-use crate::models::Plugin;
+use crate::models::{FileViewer, Plugin};
 
 fn plugins() -> &'static Mutex<HashMap<u32, Plugin>> {
     static PLUGINS: OnceLock<Mutex<HashMap<u32, Plugin>>> = OnceLock::new();
@@ -52,4 +52,36 @@ pub fn get_plugins() -> Vec<(u32, Plugin)> {
         .collect();
 
     res
+}
+
+/// Looks a plugin up by its identifier (the name of its folder).
+pub fn get_plugin_by_identifier(identifier: &str) -> Option<(u32, Plugin)> {
+    plugins().lock().unwrap().iter()
+        .find(|(_, plugin)| plugin.identifier() == identifier)
+        .map(|(id, plugin)| (*id, plugin.clone()))
+}
+
+/// Components that can display files with the given extension (lowercase, without dot).
+pub fn get_file_viewers(extension: &str) -> Vec<FileViewer> {
+    let extension = extension.to_lowercase();
+    let mut viewers: Vec<FileViewer> = plugins().lock().unwrap().iter()
+        .flat_map(|(plugin_id, plugin)| {
+            plugin.manifest.frontend_components.iter()
+                .filter(|component| component.file_viewer_for.contains(&extension))
+                .map(|component| FileViewer {
+                    plugin_id: *plugin_id,
+                    plugin_name: plugin.manifest.description.name.clone(),
+                    component_name: component.name.clone(),
+                    title: component.title.clone().unwrap_or_else(|| plugin.manifest.description.name.clone()),
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    viewers.sort_by_key(|viewer| (viewer.plugin_id, viewer.component_name.clone()));
+    viewers
+}
+
+#[cfg(test)]
+pub fn insert_test_plugin(id: u32, plugin: Plugin) {
+    plugins().lock().unwrap().insert(id, plugin);
 }

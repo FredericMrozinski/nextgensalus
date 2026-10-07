@@ -23,6 +23,10 @@ use tokio::sync::oneshot;
 const REQUEST_CHANNEL: &str = "http://request";
 const RESPONSE_CHANNEL: &str = "http://response";
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+// A frontend usually loads before its backend has connected and opened its routes. Wait for the
+// connection, then give the backend this long after connecting to open the route.
+const BACKEND_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+const ROUTE_OPEN_GRACE: Duration = Duration::from_secs(2);
 const ALLOWED_METHODS: [&str; 7] = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"];
 
 // Never forward cookies / authorization: plugin backends must not see the session.
@@ -234,6 +238,20 @@ pub fn backend_disconnected(be_pid: u32) {
 // Forwarding
 // ============================================================================
 
+async fn wait_for_route(be_pid: u32, method: &str, path: &str) -> Result<(String, Vec<(String, String)>), StatusCode> {
+    let started = std::time::Instant::now();
+    loop {
+        if let Some(matched) = match_route(be_pid, method, path) {
+            return Ok(matched);
+        }
+        match plugin_message_router::backend_connected_since(be_pid) {
+            Some(since) if since.elapsed() >= ROUTE_OPEN_GRACE => return Err(StatusCode::NOT_FOUND),
+            None if started.elapsed() >= BACKEND_CONNECT_TIMEOUT => return Err(StatusCode::SERVICE_UNAVAILABLE),
+            _ => tokio::time::sleep(Duration::from_millis(50)).await,
+        }
+    }
+}
+
 pub async fn request_via_backend(
     be_pid: u32,
     fe_pid: u32,
@@ -243,7 +261,7 @@ pub async fn request_via_backend(
     headers: Vec<(String, String)>,
     body: &[u8],
 ) -> Result<HttpReply, StatusCode> {
-    let (route, params) = match_route(be_pid, method, path).ok_or(StatusCode::NOT_FOUND)?;
+    let (route, params) = wait_for_route(be_pid, method, path).await?;
 
     let id = next_request_id();
     let key = (be_pid, id);
@@ -314,10 +332,7 @@ async fn handle_request(
     body: Bytes,
 ) -> Response {
     // Same session check as the asset server, plus: the frontend must belong to this user.
-    let Some(session_id) = jar.get("session_id").and_then(|c| c.value().parse::<u32>().ok()) else {
-        return StatusCode::UNAUTHORIZED.into_response();
-    };
-    let Ok(user_id) = session_manager::get_user_id_from_session(session_id) else {
+    let Some(user_id) = session_manager::user_id_from_jar(&jar) else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
     let Some(owner) = plugin_process_manager::get_frontend_owner(fe_pid) else {
@@ -523,6 +538,32 @@ mod tests {
         drop(backend);
         assert_eq!(pending.await.unwrap().err(), Some(StatusCode::BAD_GATEWAY));
         assert!(match_route(be_pid, "POST", "/doc/1").is_none());
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[tokio::test]
+    async fn request_waits_for_backend_to_open_its_route() {
+        let be_pid = 900_101;
+        let fe_pid = 30_002;
+        let path = std::env::temp_dir().join("salus-test-900101.sock");
+        let handle = BackendPluginSocketHandle::bind(path.clone()).unwrap();
+        let _accept = plugin_message_router::establish_backend_streams(be_pid, handle);
+
+        // The frontend asks before the backend even connected.
+        let request = tokio::spawn(request_via_backend(be_pid, fe_pid, "GET", "/late", "", vec![], b""));
+        tokio::time::sleep(Duration::from_millis(150)).await;
+
+        let mut backend = UnixStream::connect(&path).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        let open = json!({"id": 1, "method": "GET", "path": "/late"});
+        write_frame(&mut backend, 0, "salus://http/open", salus_control::pack_meta(&open, b"")).await;
+        let _ = read_frame(&mut backend).await;
+
+        let forwarded = read_frame(&mut backend).await;
+        let (meta, _) = salus_control::unpack_meta(&forwarded.payload).unwrap();
+        let response = json!({"id": meta["id"], "status": 200, "headers": []});
+        write_frame(&mut backend, fe_pid, "http://response", salus_control::pack_meta(&response, b"")).await;
+        assert_eq!(request.await.unwrap().unwrap().status, 200);
         let _ = std::fs::remove_file(&path);
     }
 }
