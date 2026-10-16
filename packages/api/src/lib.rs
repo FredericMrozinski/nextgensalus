@@ -60,7 +60,7 @@ pub fn run_server(app: fn() -> Element) {
             .layer(axum::extract::DefaultBodyLimit::max(32 * 1024 * 1024));
 
         let router = dioxus::server::router(app)
-            .route("/salus/theme.css", routing::get(theme_css))
+            .route("/assets/theme.css", routing::get(theme_css))
             .nest("/plugins", protected_pfe_asset_fetcher)
             .merge(plugin_api)
             .route("/plugin-stream", routing::get(browser_connections::plugin_stream))
