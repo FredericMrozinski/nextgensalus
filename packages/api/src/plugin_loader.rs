@@ -44,7 +44,7 @@ fn read_available_plugins_from_disk(plugin_dir: &str) -> Vec<models::Plugin> {
         let manifest_path_str = path.join("manifest.toml").display().to_string();
 
         if is_dir {
-            if Path::new(&path_str).exists() {
+            if Path::new(&manifest_path_str).exists() {
                 info!("manifest.toml exists for {}", &manifest_path_str);
 
                 let manifest_content = fs::read_to_string(&manifest_path_str).unwrap();

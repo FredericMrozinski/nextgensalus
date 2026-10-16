@@ -78,6 +78,6 @@ async fn theme_css() -> impl axum::response::IntoResponse {
             (axum::http::header::CONTENT_TYPE, "text/css; charset=utf-8"),
             (axum::http::header::CACHE_CONTROL, "no-cache"),
         ],
-        include_str!("theme.css"),
+        include_str!("../../web/assets/theme.css"),
     )
 }

@@ -330,7 +330,7 @@ fn apply_theme_to_frame(frontend_process_id: u32, theme: &str) {
         if let (Ok(link), Some(head)) = (frame_document.create_element("link"), frame_document.head()) {
             link.set_id("salus-theme-link");
             let _ = link.set_attribute("rel", "stylesheet");
-            let _ = link.set_attribute("href", "/salus/theme.css");
+            let _ = link.set_attribute("href", &crate::workspace::THEME_CSS.to_string());
             let _ = head.append_child(&link);
         }
     }

@@ -19,6 +19,8 @@ use viewer_picker::ViewerPicker;
 use resize_handle::{ResizeAxis, ResizeHandle};
 use state::{PanelId, TabContent, Theme, ViewerPickerRequest};
 
+pub const THEME_CSS: Asset = asset!("/assets/theme.css");
+
 /// Root of the IDE-like shell: one center panel, two side panels and a
 /// bottom panel, each independently resizable by dragging the handles
 /// between them.
@@ -86,8 +88,9 @@ pub fn Workspace() -> Element {
     let right_width = workspace.right_width();
     let bottom_height = workspace.bottom_height();
 
+
     rsx! {
-        document::Stylesheet { href: "/salus/theme.css" }
+        document::Stylesheet { href: THEME_CSS }
         document::Stylesheet { href: asset!("/assets/workspace.css") }
         div { class: "workspace-root",
             div { class: "workspace-main-row",
