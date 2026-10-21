@@ -7,12 +7,14 @@ use workspace::Workspace;
 
 
 fn main() {
-    #[cfg(feature = "server")]
-    {
+    #[cfg(feature = "server")] {
         api::run_server(App);
     }
-    #[cfg(not(feature = "server"))]
-    {
+    #[cfg(feature = "web")]  {
+        console_error_panic_hook::set_once();
+    }
+    console_error_panic_hook::set_once();
+    #[cfg(not(feature = "server"))] {
         dioxus::launch(App);
     }
 }
