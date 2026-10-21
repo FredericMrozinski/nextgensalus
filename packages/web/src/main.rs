@@ -19,8 +19,20 @@ fn main() {
     }
 }
 
+#[cfg(feature = "web")]
+fn init_server_url() {
+    let origin = web_sys::window().unwrap().location().origin().unwrap();
+    // must match base_path in Dioxus.toml, with a leading slash
+    let url = format!("{origin}/user/fmrozins/salus/salus");
+    dioxus_fullstack::set_server_url(Box::leak(url.into_boxed_str()));
+}
+
 #[component]
 fn App() -> Element {
+    use_hook(|| {
+        #[cfg(feature = "web")]
+        init_server_url();
+    });
     use_effect(|| {
         frontend_communication_relay::init_plugin_bridge();
     });
