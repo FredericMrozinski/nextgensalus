@@ -10,10 +10,10 @@ fn main() {
     #[cfg(feature = "server")] {
         api::run_server(App);
     }
-    #[cfg(feature = "web")]  {
-        console_error_panic_hook::set_once();
-    }
-    console_error_panic_hook::set_once();
+
+    #[cfg(feature = "web")]
+    init_server_url();
+
     #[cfg(not(feature = "server"))] {
         dioxus::launch(App);
     }
@@ -22,17 +22,12 @@ fn main() {
 #[cfg(feature = "web")]
 fn init_server_url() {
     let origin = web_sys::window().unwrap().location().origin().unwrap();
-    // must match base_path in Dioxus.toml, with a leading slash
-    let url = format!("{origin}/user/fmrozins/salus/salus");
+    let url = format!("{origin}/user/fmrozins/salus/salus"); // same as base_path, with leading slash
     dioxus_fullstack::set_server_url(Box::leak(url.into_boxed_str()));
 }
 
 #[component]
 fn App() -> Element {
-    use_hook(|| {
-        #[cfg(feature = "web")]
-        init_server_url();
-    });
     use_effect(|| {
         frontend_communication_relay::init_plugin_bridge();
     });
