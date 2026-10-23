@@ -663,7 +663,18 @@ export class Http {
   #base;
   #fetch;
 
-  constructor(frontendId, { base = "", fetch: fetchFn } = {}) {
+  /**
+   * Prefix Salus is served under (for example `/user/me/salus` behind JupyterHub). A plugin page is
+   * always served from `<prefix>/plugins/...`, so the prefix is whatever precedes that.
+   * @param {string} pathname path of the plugin page
+   */
+  static prefixOf(pathname) {
+    const at = pathname.indexOf("/plugins/");
+    return at > 0 ? pathname.slice(0, at) : "";
+  }
+
+  constructor(frontendId, { base, fetch: fetchFn } = {}) {
+    base ??= Http.prefixOf(globalThis.location?.pathname ?? "");
     this.#base = `${base}/plugin-api/${frontendId}`;
     this.#fetch = fetchFn;
   }

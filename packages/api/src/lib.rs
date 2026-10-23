@@ -6,6 +6,7 @@ mod config_loader;
 #[cfg(feature = "server")]
 mod plugin_loader;
 pub mod models;
+pub mod base_url;
 
 #[cfg(feature = "server")]
 mod plugin_library;

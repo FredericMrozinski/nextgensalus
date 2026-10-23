@@ -95,7 +95,7 @@ pub fn PluginFrame(component: SpawnedComponent) -> Element {
                     iframe {
                         id: pid,
                         class: "plugin-frame",
-                        src: "/plugins/{entrypoint}?{query}",
+                        src: api::base_url::with_base(&format!("/plugins/{entrypoint}?{query}")),
                         // Injects the theme stylesheet and sets the page's theme once the plugin has loaded.
                         onload: move |_| relay::apply_theme(pid, workspace.theme().as_str()),
                         width: "100%",

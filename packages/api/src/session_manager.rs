@@ -12,10 +12,10 @@ pub fn get_user_id_from_session(session_id: u32) -> Result<u32, StatusCode> {
 
 pub async fn dev_login(cookie_jar: CookieJar) -> (CookieJar, Redirect) {
     let cookie = Cookie::build(("session_id", "0"))
-        .path("/") // makes it visible to every route, not just /plugins
+        .path(crate::base_url::with_base("/")) // visible to every route of this app, but not of other apps on the host
         .build();
 
-    (cookie_jar.add(cookie), Redirect::to("/"))
+    (cookie_jar.add(cookie), Redirect::to(&crate::base_url::with_base("/")))
 }
 
 pub async fn session_valid(cookie_jar: CookieJar) -> bool {

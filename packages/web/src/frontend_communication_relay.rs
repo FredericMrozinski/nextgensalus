@@ -158,7 +158,7 @@ fn route_between_components(frame: PluginMessageFrame) -> Option<PluginMessageFr
 
 // === Forwarding to backend and directly
 fn run_socket_to_backend(mut plugin_salus_stream: UnboundedReceiver<PluginMessageFrame>) {
-    let ws = WebSocket::open(&format!("/plugin-stream?page={}", page_id())).unwrap();
+    let ws = WebSocket::open(&ws_url(&format!("/plugin-stream?page={}", page_id()))).unwrap();
     let (mut write, mut read) = ws.split();
 
     // Encodes message from JS to byte-stream and forwards to backend
@@ -347,4 +347,11 @@ pub fn apply_theme_to_all_frames(theme: &str) {
     for id in ids {
         apply_theme_to_frame(id, theme);
     }
+}
+
+/// Absolute `ws(s)://` URL of a path of this application, including the base path prefix.
+fn ws_url(path: &str) -> String {
+    let location = web_sys::window().unwrap().location();
+    let scheme = if location.protocol().unwrap_or_default() == "https:" { "wss" } else { "ws" };
+    format!("{scheme}://{}{}", location.host().unwrap_or_default(), api::base_url::with_base(path))
 }
