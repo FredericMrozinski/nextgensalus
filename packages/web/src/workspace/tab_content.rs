@@ -80,8 +80,9 @@ pub fn PluginFrame(component: SpawnedComponent) -> Element {
                 let Some(frontend) = plugin.component(&component.component_name) else {
                     return rsx! { div { class: "panel-empty", "ERROR: The plugin has no such component." } };
                 };
-                let entrypoint = PathBuf::from_iter([&plugin.plugin_folder_name, &frontend.entry_point_file_path]);
-                let entrypoint = entrypoint.to_str().unwrap();
+                // Relative to the plugins directory: the server resolves it (and the browser never sees the
+                // server's absolute paths, which a proxy collapsing `//` would also break).
+                let entrypoint = format!("{}/{}", plugin.identifier(), frontend.entry_point_file_path.trim_start_matches('/'));
 
                 let mut query = format!("fe_process_id={pid}&component={}", component.component_name);
                 if let Some(parent) = component.parent_frontend_process_id {
