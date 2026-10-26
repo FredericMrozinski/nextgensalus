@@ -73,6 +73,10 @@ pub fn execute_plugin_backend_process(
     let mut cmd = Command::new(entrypoint);
     cmd.arg(&path); // tell the spawned process where to connect
 
+    // The backend reads and writes its config directory itself; it learns where it is from the environment.
+    let config_dir = crate::config_loader::plugin_config_dir(&plugin.identifier())?;
+    cmd.env("SALUS_CONFIG_DIR", config_dir);
+
     let child = spawn_tied(&mut cmd)?;
 
     Ok((child, handle))

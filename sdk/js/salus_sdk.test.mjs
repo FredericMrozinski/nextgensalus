@@ -409,6 +409,58 @@ test("plain http calls do not throw on error statuses", async () => {
   assert.equal(response.status, 502);
 });
 
+// --- Config directory ---------------------------------------------------------
+
+test("config reads, writes, lists and deletes through the framework", async () => {
+  const files = new Map();
+  const { salus, calls } = httpEnvironment((url, init) => {
+    const path = decodeURIComponent(url.slice(`/plugin-config/${FE}`.length));
+    if (init.method === "PUT") {
+      files.set(path, init.body);
+      return new Response(null, { status: 204 });
+    }
+    if (init.method === "DELETE") return files.delete(path) ? new Response(null, { status: 204 }) : new Response("", { status: 404 });
+    if (url.includes("?list")) return Response.json([{ name: "a.json", is_dir: false, size: 2 }, { name: "sub", is_dir: true, size: 0 }]);
+    return files.has(path) ? new Response(files.get(path)) : new Response("", { status: 404 });
+  });
+  const { config } = salus;
+
+  await config.writeJson("a b/c.json", { n: 1 });
+  assert.equal(calls[0].url, `/plugin-config/${FE}/a%20b/c.json`);
+  assert.equal(calls[0].init.method, "PUT");
+  assert.deepEqual(await config.readJson("a b/c.json"), { n: 1 });
+
+  await config.writeText("t.txt", "héllo");
+  assert.equal(await config.readText("t.txt"), "héllo");
+  await config.writeBytes("b.bin", new Uint8Array([1, 2]));
+  assert.deepEqual(await config.readBytes("b.bin"), new Uint8Array([1, 2]));
+
+  assert.equal(await config.readText("missing"), null);
+  assert.deepEqual(await config.readJson("missing", { d: 1 }), { d: 1 });
+
+  assert.deepEqual(await config.list(), ["a.json", "sub/"]);
+  assert.equal(calls.at(-1).url, `/plugin-config/${FE}?list`);
+  await config.list("sub");
+  assert.equal(calls.at(-1).url, `/plugin-config/${FE}/sub/?list`);
+  assert.equal(await config.exists("sub"), true);
+  assert.equal(await config.exists("nope"), false);
+
+  await config.delete("t.txt");
+  await assert.rejects(config.delete("t.txt"), (e) => e instanceof HttpError && e.status === 404);
+});
+
+test("config refuses names that leave the directory and surfaces server errors", async () => {
+  const { salus, calls } = httpEnvironment(() => new Response("too big", { status: 413 }));
+  for (const bad of ["../x", "/abs", "a//b", "a/./b", "..", "a\\b", "c:x"]) {
+    await assert.rejects(salus.config.readText(bad), TypeError, bad);
+    await assert.rejects(salus.config.delete(bad), TypeError, bad);
+  }
+  await assert.rejects(salus.config.writeText("", "x"), TypeError);
+  await assert.rejects(salus.config.delete(""), TypeError);
+  assert.equal(calls.length, 0, "nothing is sent for invalid names");
+  await assert.rejects(salus.config.writeText("big", "x"), (e) => e instanceof HttpError && e.status === 413 && e.body === "too big");
+});
+
 // --- Requests, dependencies and peers -----------------------------------------
 
 const metaFrame = (channel, meta, body = [], extra = {}) => frame(channel, packMeta(meta, new Uint8Array(body)), extra);

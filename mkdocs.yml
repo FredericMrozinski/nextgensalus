@@ -80,6 +80,7 @@ nav:
       - File viewers: guides/file-viewers.md
       - Theming: guides/theming.md
       - HTTP routes: guides/http.md
+      - Configuration files: guides/config.md
       - Payloads: guides/payloads.md
       - Plugin dependencies: guides/dependencies.md
       - "Tutorial: a whole slide viewer": guides/image-viewer.md

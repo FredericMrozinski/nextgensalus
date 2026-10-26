@@ -30,6 +30,7 @@ Creates the connection. Throws `SalusError` if the page is not inside a Salus if
 |---|---|
 | `salus.frontendId` | Id of this frontend instance. |
 | `salus.http` | An [`Http`](#http) helper bound to this frontend. |
+| `salus.config` | The plugin's [config directory](../guides/config.md): `readText/readJson/readBytes`, `writeText/writeJson/writeBytes`, `exists`, `list`, `delete`. |
 | `salus.component` | This frontend's `component-name` from the manifest (`null` if unknown). |
 | `salus.params` | What this component was opened with: the `params` of `openComponent`/`openDependency`, or `{file}` for a [file viewer](../guides/file-viewers.md). `null` if none. |
 | `salus.parent` | `Peer` of the frontend that opened this one, or `null`. |

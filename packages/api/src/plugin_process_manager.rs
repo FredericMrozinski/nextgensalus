@@ -410,6 +410,10 @@ pub fn get_be_pid_for_fe_pid(fe_pid: u32) -> Option<u32> {
     Some(frontend_process.backend_process_id)
 }
 
+pub fn get_plugin_id_for_fe_pid(fe_pid: u32) -> Option<u32> {
+    frontend_processes().lock().unwrap().get(&fe_pid).map(|fe| fe.plugin_id)
+}
+
 pub fn get_frontend_owner(fe_pid: u32) -> Option<User> {
     frontend_processes().lock().unwrap().get(&fe_pid).map(|fe| fe.owner.clone())
 }

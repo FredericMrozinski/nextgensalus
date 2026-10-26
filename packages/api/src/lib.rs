@@ -35,6 +35,9 @@ mod browser_connections;
 #[cfg(feature = "server")]
 mod http_gateway;
 
+#[cfg(feature = "server")]
+mod plugin_config_api;
+
 pub mod framework_web_api;
 
 #[cfg(feature = "server")]
@@ -51,6 +54,7 @@ use dioxus::server::DioxusRouterExt;
 #[cfg(feature = "server")]
 pub fn run_server(app: fn() -> Element) {
     dioxus::serve(move || async move {
+        config_loader::init();
         plugin_library::init();
 
         // Build protected plugin frontend asset fetching
@@ -62,12 +66,21 @@ pub fn run_server(app: fn() -> Element) {
             .route("/plugin-api/{fe_pid}/{*path}", routing::any(http_gateway::handle))
             .layer(axum::extract::DefaultBodyLimit::max(32 * 1024 * 1024));
 
+        // Plugin frontends read and write their plugin's config directory through here.
+        let plugin_config = axum::Router::new()
+            .route("/plugin-config/{fe_pid}", routing::any(plugin_config_api::handle_root))
+            .route("/plugin-config/{fe_pid}/{*path}", routing::any(plugin_config_api::handle))
+            .layer(axum::extract::DefaultBodyLimit::max(
+                config_loader::framework_config().plugin_config_max_file_bytes as usize,
+            ));
+
         // Our routes are added to the Dioxus application *before* it is put under the base path, so that
         // they live under the same prefix as the assets and the server functions.
         let app_router = axum::Router::new()
             .route("/assets/theme.css", routing::get(theme_css))
             .nest("/plugins", protected_pfe_asset_fetcher)
             .merge(plugin_api)
+            .merge(plugin_config)
             .route("/plugin-stream", routing::get(browser_connections::plugin_stream))
             .route("/dev/login", routing::get(session_manager::dev_login)) // TODO remove the dev/login
             .serve_dioxus_application(dioxus::server::ServeConfig::new(), app);

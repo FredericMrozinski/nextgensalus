@@ -19,6 +19,7 @@ import salus_sdk as salus
         - route
         - add_route
         - remove_route
+        - config
         - frontends
         - frontend_component
         - on_frontend_attached
@@ -40,6 +41,23 @@ import salus_sdk as salus
       show_if_no_docstring: true
 
 ## HTTP
+
+::: salus_sdk.Config
+    options:
+      merge_init_into_class: true
+      show_if_no_docstring: true
+      members:
+        - path
+        - path_of
+        - exists
+        - read_bytes
+        - read_text
+        - read_json
+        - write_bytes
+        - write_text
+        - write_json
+        - list
+        - delete
 
 ::: salus_sdk.Request
     options:
