@@ -1,4 +1,3 @@
-use directories::ProjectDirs;
 use crate::models;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -14,9 +13,7 @@ pub fn load_available_plugins() -> Vec<models::Plugin> {
 }
 
 pub fn get_plugins_root_path() -> std::path::PathBuf {
-    let dirs = ProjectDirs::from("org", "fredericmrozinski", "salus")
-        .expect("could not determine home directory");
-    dirs.data_dir().join("plugins")
+    crate::config_loader::plugins_dir()
 }
 
 fn build_plugins_root_if_not_exists(path_buf: &PathBuf) {

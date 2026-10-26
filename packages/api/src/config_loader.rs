@@ -31,17 +31,22 @@ const DEFAULT_FRAMEWORK_CONFIG: &str = "\
 
 # Largest file a plugin may write into its config directory through the frontend SDK, in bytes.
 # plugin_config_max_file_bytes = 8388608
+
+# Directory the plugins are installed in. A relative path is taken relative to this file's directory.
+# Defaults to the \"plugins\" folder of the platform's data directory.
+# plugins_dir = \"/path/to/plugins\"
 ";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(default, deny_unknown_fields)]
 pub struct FrameworkConfig {
     pub plugin_config_max_file_bytes: u64,
+    pub plugins_dir: Option<PathBuf>,
 }
 
 impl Default for FrameworkConfig {
     fn default() -> Self {
-        Self { plugin_config_max_file_bytes: DEFAULT_MAX_FILE_BYTES }
+        Self { plugin_config_max_file_bytes: DEFAULT_MAX_FILE_BYTES, plugins_dir: None }
     }
 }
 
@@ -91,6 +96,17 @@ pub fn config_root() -> PathBuf {
 /// `<data dir>/plugins`, so the configuration goes into a `config` folder of its own there.
 fn config_root_for(config_dir: &Path, data_dir: &Path) -> PathBuf {
     if config_dir == data_dir { config_dir.join("config") } else { config_dir.to_path_buf() }
+}
+
+/// Where plugins are installed: `plugins_dir` from `salus.toml`, else the `plugins` folder of the data directory.
+pub fn plugins_dir() -> PathBuf {
+    match &framework_config().plugins_dir {
+        Some(dir) => config_root().join(dir), // an absolute `dir` replaces the root
+        None => ProjectDirs::from("org", "fredericmrozinski", "salus")
+            .expect("could not determine home directory")
+            .data_dir()
+            .join("plugins"),
+    }
 }
 
 pub fn framework_config_path() -> PathBuf {
@@ -306,6 +322,9 @@ mod tests {
         assert_eq!(c.plugin_config_max_file_bytes, 5);
         assert_eq!(toml::from_str::<FrameworkConfig>("").unwrap(), FrameworkConfig::default());
         assert!(toml::from_str::<FrameworkConfig>("typo = 1").is_err());
+        let c: FrameworkConfig = toml::from_str("plugins_dir = \"/opt/plugins\"").unwrap();
+        assert_eq!(c.plugins_dir, Some(PathBuf::from("/opt/plugins")));
+        assert_eq!(Path::new("/root/config").join("/opt/plugins"), Path::new("/opt/plugins"));
         assert!(toml::from_str::<FrameworkConfig>(DEFAULT_FRAMEWORK_CONFIG).is_ok());
     }
 }
