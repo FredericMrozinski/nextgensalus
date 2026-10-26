@@ -45,6 +45,8 @@ use dioxus::prelude::*;
 
 #[cfg(feature = "server")]
 use axum::routing;
+#[cfg(feature = "server")]
+use dioxus::server::DioxusRouterExt;
 
 #[cfg(feature = "server")]
 pub fn run_server(app: fn() -> Element) {
@@ -60,15 +62,34 @@ pub fn run_server(app: fn() -> Element) {
             .route("/plugin-api/{fe_pid}/{*path}", routing::any(http_gateway::handle))
             .layer(axum::extract::DefaultBodyLimit::max(32 * 1024 * 1024));
 
-        let router = dioxus::server::router(app)
+        // Our routes are added to the Dioxus application *before* it is put under the base path, so that
+        // they live under the same prefix as the assets and the server functions.
+        let app_router = axum::Router::new()
             .route("/assets/theme.css", routing::get(theme_css))
             .nest("/plugins", protected_pfe_asset_fetcher)
             .merge(plugin_api)
             .route("/plugin-stream", routing::get(browser_connections::plugin_stream))
-            .route("/dev/login", routing::get(session_manager::dev_login)); // TODO remove the dev/login
+            .route("/dev/login", routing::get(session_manager::dev_login)) // TODO remove the dev/login
+            .serve_dioxus_application(dioxus::server::ServeConfig::new(), app);
+        let router = under_base_path(app_router);
 
         Ok(router)
     });
+}
+
+/// Serves the router under Dioxus' base path (`dx serve --base-path`), the way `dioxus::server::router`
+/// does for the application alone.
+#[cfg(feature = "server")]
+fn under_base_path(router: axum::Router) -> axum::Router {
+    let base = base_url::base_path();
+    if base.is_empty() {
+        return router;
+    }
+    // Axum serves a nested router at `/base/` only, so `/base` redirects there (relative, so a proxy prefix is kept).
+    let last = base.rsplit('/').next().unwrap_or_default().to_string();
+    axum::Router::new()
+        .nest(&format!("{base}/"), router)
+        .route(&base, routing::get(move || async move { axum::response::Redirect::to(&format!("{last}/")) }))
 }
 
 /// The theme stylesheet Salus injects into plugin frontends (and uses for its own workspace).
