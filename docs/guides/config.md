@@ -119,7 +119,8 @@ which also holds the installed plugins in `plugins/`. There the config root is i
 
 `<plugin folder name>` is the name of your plugin's folder in the plugins directory. Users may edit the files by hand; Salus
 ignores values that no longer fit the configurable. A file that is not valid TOML is reported in the server log, read as empty, and
-**not overwritten** (changes are refused until it is fixed). Salus rewrites the file when a setting changes, so comments in it are not kept.
+**not overwritten** (changes are refused until it is fixed). Salus rewrites the file when a setting changes, so comments in it are not kept. If `salus.toml` is missing, Salus creates it again at start with every
+setting commented out (so it also lists what can be configured). The plugins' files are created when their first setting is saved.
 
 ## The settings of Salus
 

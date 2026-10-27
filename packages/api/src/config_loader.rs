@@ -61,8 +61,43 @@ pub fn init() {
         warn!("Cannot create config directory {}: {e}", root.display());
         return;
     }
-    info!("Framework configuration: {}", framework_config_path().display());
+    let path = framework_config_path();
+    match create_default_config(&path, salus_configurable()) {
+        Ok(true) => info!("Created {}", path.display()),
+        Ok(false) => {}
+        Err(e) => warn!("Cannot create {}: {e}", path.display()),
+    }
+    info!("Framework configuration: {}", path.display());
     framework_config();
+}
+
+/// The text of a config file for a configurable that has nothing set: every setting as a comment with its explanation and
+/// default, so the file shows what can be configured. (Salus rewrites the file when a setting changes, which drops the comments.)
+fn default_config_text(configurable: &Configurable) -> String {
+    let mut text = String::from("# Settings of Salus. Everything is commented out, so every setting has its default.\n# Change them in the Salus settings, or uncomment a line here and restart Salus.\n");
+    for setting in &configurable.settings {
+        text.push_str(&format!("\n# {}\n", setting.name));
+        for line in setting.description.lines() {
+            text.push_str(&format!("# {line}\n"));
+        }
+        let default = setting.default.as_ref().map_or_else(|| "...".to_string(), |value| {
+            toml::Value::try_from(value).map_or_else(|_| value.to_string(), |value| value.to_string())
+        });
+        text.push_str(&format!("# {} = {}\n", setting.key, default));
+    }
+    text
+}
+
+/// Writes the default config file if there is none. Returns whether it was created; an existing file is never touched.
+fn create_default_config(path: &Path, configurable: &Configurable) -> io::Result<bool> {
+    match fs::OpenOptions::new().write(true).create_new(true).open(path) {
+        Ok(mut file) => {
+            io::Write::write_all(&mut file, default_config_text(configurable).as_bytes())?;
+            Ok(true)
+        }
+        Err(e) if e.kind() == io::ErrorKind::AlreadyExists => Ok(false),
+        Err(e) => Err(e),
+    }
 }
 
 pub fn config_root() -> PathBuf {
@@ -251,6 +286,30 @@ mod tests {
         assert!(!read_stored(&path).unwrap().contains_key("zoom"));
         let leftovers: Vec<_> = fs::read_dir(path.parent().unwrap()).unwrap().map(|e| e.unwrap().file_name()).collect();
         assert_eq!(leftovers.len(), 1, "no temp files are left behind");
+    }
+
+    #[test]
+    fn a_missing_framework_config_is_created_and_an_existing_one_is_left_alone() {
+        let dir = temp_dir("default");
+        let path = dir.join("config").join("salus.toml");
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let c = salus_configurable();
+
+        assert!(create_default_config(&path, c).unwrap());
+        let text = fs::read_to_string(&path).unwrap();
+        assert!(text.contains("# theme = \"dark\""), "{text}");
+        assert!(text.contains("# plugins_dir = \"\""), "{text}");
+        assert!(read_stored(&path).unwrap().is_empty(), "everything is commented out");
+        assert_eq!(Value::Object(load_effective(&path, c)), Value::Object(c.effective(&Map::new())));
+
+        fs::write(&path, "theme = \"light\"\n").unwrap();
+        assert!(!create_default_config(&path, c).unwrap());
+        assert_eq!(fs::read_to_string(&path).unwrap(), "theme = \"light\"\n");
+
+        // the first change through the settings keeps working on the template
+        fs::write(&path, text).unwrap();
+        let values = update(&path, c, &updates(json!({"theme": "midnight"}))).unwrap();
+        assert_eq!(values["theme"], "midnight");
     }
 
     #[test]
