@@ -62,4 +62,7 @@ in whatever viewer is installed.
 
 - Frontends run in the user's browser, as iframes of the Salus page, served from the framework's own origin.
 - The Salus page relays channel and peer messages between iframes and the server over one websocket per page.
+  The server pings the websocket every 20 seconds so that a proxy in front of Salus (nginx, JupyterHub) does not close it as idle. If it breaks anyway, the page
+  reconnects by itself (retrying after 0.5 s, then at longer intervals up to 10 s), and the server keeps the page's frontends for 45 seconds before treating the
+  page as closed. Messages sent while the connection is down are not delivered.
 - Backends run as separate processes on the machine that hosts Salus, connected by a Unix socket each.

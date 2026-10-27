@@ -9,7 +9,7 @@ use dioxus::logger::tracing;
 use dioxus::prelude::*;
 use futures::channel::mpsc::unbounded;
 use futures::channel::oneshot;
-use futures::{SinkExt, StreamExt};
+use futures::{FutureExt, SinkExt, StreamExt};
 use gloo_net::websocket::{futures::WebSocket, Message};
 use serde_json::{json, Map, Value};
 use std::cell::RefCell;
@@ -199,43 +199,93 @@ fn route_between_components(frame: PluginMessageFrame) -> Option<PluginMessageFr
 }
 
 // === Forwarding to backend and directly
+/// Waits for `ms` milliseconds.
+async fn sleep(ms: i32) {
+    let (tx, rx) = oneshot::channel::<()>();
+    let tx = RefCell::new(Some(tx));
+    let callback = Closure::once_into_js(move || {
+        if let Some(tx) = tx.borrow_mut().take() {
+            let _ = tx.send(());
+        }
+    });
+    if let Some(window) = web_sys::window() {
+        let _ = window.set_timeout_with_callback_and_timeout_and_arguments_0(callback.unchecked_ref(), ms);
+        let _ = rx.await;
+    }
+}
+
+/// Handles one binary frame from the server: the theme announcement, or a message for a plugin page.
+fn handle_server_frame(bytes: &[u8]) {
+    let frame = match PluginMessageFrame::decode(bytes) {
+        Ok(frame) => frame,
+        Err(e) => {
+            warn!("Dropping invalid frame from the server: {e}");
+            return;
+        }
+    };
+    if frame.logical_channel == api::message_frame::THEME_CHANNEL {
+        // Not for a plugin: the server says the theme changed.
+        let handler = THEME_CHANGE_HANDLER.with(|slot| slot.borrow().clone());
+        if let (Some(handler), Ok(theme)) = (handler, String::from_utf8(frame.payload)) {
+            handler(theme);
+        }
+        return;
+    }
+    spawn(send_message_to_plugin(frame));
+}
+
+/// The websocket to the server: carries messages of plugin frontends to their backends and back. A proxy in front of
+/// Salus may drop it (it sits idle, the network changes), so it is opened again for as long as the page lives; the server
+/// keeps the page's frontends for a while in between.
 fn run_socket_to_backend(mut plugin_salus_stream: UnboundedReceiver<PluginMessageFrame>) {
-    let ws = WebSocket::open(&ws_url(&format!("/plugin-stream?page={}", page_id()))).unwrap();
-    let (mut write, mut read) = ws.split();
-
-    // Encodes message from JS to byte-stream and forwards to backend
-    let send_task = async move {
-        while let Some(frame) = plugin_salus_stream.next().await {
-            if frame.logical_channel.starts_with(SALUS_PREFIX) {
-                spawn(handle_control_request(frame));
-                continue;
-            }
-            let Some(frame) = route_between_components(frame) else {
-                continue;
-            };
-
-            let enc_frame = frame.encode().unwrap();
-            write.send(Message::Bytes(enc_frame)).await.unwrap();
-        }
-    };
-    spawn(send_task);
-
-    // Receives a message from backend and sends it to plugin frontend
-    let recv_task = async move {
-        while let Some(Ok(Message::Bytes(frame))) = read.next().await {
-            let dec_frame = PluginMessageFrame::decode(&frame).unwrap();
-            if dec_frame.logical_channel == api::message_frame::THEME_CHANNEL {
-                // Not for a plugin: the server says the theme changed.
-                let handler = THEME_CHANGE_HANDLER.with(|slot| slot.borrow().clone());
-                if let (Some(handler), Ok(theme)) = (handler, String::from_utf8(dec_frame.payload)) {
-                    handler(theme);
+    let connection = async move {
+        let mut retry_ms = 500;
+        loop {
+            match WebSocket::open(&ws_url(&format!("/plugin-stream?page={}", page_id()))) {
+                Ok(ws) => {
+                    let (mut write, mut read) = ws.split();
+                    let mut opened = false;
+                    loop {
+                        futures::select! {
+                            frame = plugin_salus_stream.next().fuse() => {
+                                let Some(frame) = frame else { return };
+                                if frame.logical_channel.starts_with(SALUS_PREFIX) {
+                                    spawn(handle_control_request(frame));
+                                    continue;
+                                }
+                                let Some(frame) = route_between_components(frame) else {
+                                    continue;
+                                };
+                                let Ok(encoded) = frame.encode() else {
+                                    warn!("Dropping a frame that cannot be encoded");
+                                    continue;
+                                };
+                                if write.send(Message::Bytes(encoded)).await.is_err() {
+                                    break;
+                                }
+                            }
+                            incoming = read.next().fuse() => match incoming {
+                                Some(Ok(Message::Bytes(bytes))) => {
+                                    opened = true;
+                                    handle_server_frame(&bytes);
+                                }
+                                Some(Ok(_)) => opened = true,
+                                _ => break,
+                            },
+                        }
+                    }
+                    if opened {
+                        retry_ms = 500;
+                    }
+                    warn!("The connection to the Salus server was lost; reconnecting");
                 }
-                continue;
+                Err(e) => warn!("Cannot connect to the Salus server: {e:?}"),
             }
-            spawn(send_message_to_plugin(dec_frame));
+            sleep(retry_ms).await;
+            retry_ms = (retry_ms * 2).min(10_000);
         }
     };
-    spawn(recv_task);
+    spawn(connection);
 }
 
 // === Control requests (salus://...) from plugin frontends to the framework

@@ -21,6 +21,42 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 
+/// A proxy in front of Salus (nginx, JupyterHub) closes a websocket that stays silent for about a minute. The server
+/// pings so the connection is never silent for that long; browsers answer pings on their own.
+const PING_INTERVAL: std::time::Duration = std::time::Duration::from_secs(20);
+
+/// How long the frontends of a page stay alive after its connection broke. The page reconnects by itself; only a
+/// page that does not come back within this time is treated as closed.
+const RECONNECT_GRACE: std::time::Duration = std::time::Duration::from_secs(45);
+
+/// How many connections each page (by page id) has open right now.
+fn live_pages() -> &'static Mutex<HashMap<String, usize>> {
+    static PAGES: OnceLock<Mutex<HashMap<String, usize>>> = OnceLock::new();
+    PAGES.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn page_connected(page_id: &str) {
+    *live_pages().lock().unwrap().entry(page_id.to_string()).or_insert(0) += 1;
+}
+
+/// Records that a connection of the page ended; true if the page has no connection left.
+fn page_disconnected(page_id: &str) -> bool {
+    let mut pages = live_pages().lock().unwrap();
+    let Some(count) = pages.get_mut(page_id) else {
+        return true;
+    };
+    *count = count.saturating_sub(1);
+    let gone = *count == 0;
+    if gone {
+        pages.remove(page_id);
+    }
+    gone
+}
+
+fn page_is_connected(page_id: &str) -> bool {
+    live_pages().lock().unwrap().contains_key(page_id)
+}
+
 struct BrowserConnection {
     user_id: u32,
     tx: UnboundedSender<Vec<u8>>,
@@ -154,11 +190,25 @@ pub async fn plugin_stream(jar: CookieJar, Query(query): Query<PageQuery>, ws: W
 async fn serve_socket(user_id: u32, page_id: Option<String>, socket: WebSocket) {
     let (mut writer, mut reader) = socket.split();
     let (connection_id, mut outbox) = register(user_id);
+    if let Some(page_id) = &page_id {
+        page_connected(page_id);
+    }
 
     let write_task = tokio::spawn(async move {
-        while let Some(bytes) = outbox.recv().await {
-            if writer.send(Message::Binary(bytes.into())).await.is_err() {
-                break;
+        let mut ping = tokio::time::interval(PING_INTERVAL);
+        loop {
+            tokio::select! {
+                bytes = outbox.recv() => {
+                    let Some(bytes) = bytes else { break };
+                    if writer.send(Message::Binary(bytes.into())).await.is_err() {
+                        break;
+                    }
+                }
+                _ = ping.tick() => {
+                    if writer.send(Message::Ping(Vec::new().into())).await.is_err() {
+                        break;
+                    }
+                }
             }
         }
     });
@@ -174,9 +224,16 @@ async fn serve_socket(user_id: u32, page_id: Option<String>, socket: WebSocket) 
     unregister(connection_id);
     write_task.abort();
 
-    // The page is gone, so are the plugin frontends it showed: close them (which may end `panel` backends).
+    // The page is gone, so are the plugin frontends it showed: close them (which may end `panel` backends). But a broken
+    // connection is not a closed page: its frontends live on for a while, and the page, which reconnects by itself,
+    // keeps them if it is back in time.
     if let Some(page_id) = page_id {
-        plugin_process_manager::close_page_frontends(&page_id).await;
+        if page_disconnected(&page_id) {
+            tokio::time::sleep(RECONNECT_GRACE).await;
+            if !page_is_connected(&page_id) {
+                plugin_process_manager::close_page_frontends(&page_id).await;
+            }
+        }
     }
 }
 
@@ -184,6 +241,17 @@ async fn serve_socket(user_id: u32, page_id: Option<String>, socket: WebSocket) 
 mod tests {
     use super::*;
     use crate::plugin_process_manager::insert_test_frontend;
+
+    #[test]
+    fn a_page_counts_its_connections() {
+        page_connected("page-a");
+        page_connected("page-a");
+        assert!(page_is_connected("page-a"));
+        assert!(!page_disconnected("page-a"), "one connection is left");
+        assert!(page_disconnected("page-a"));
+        assert!(!page_is_connected("page-a"));
+        assert!(page_disconnected("never-seen"));
+    }
 
     #[test]
     fn peer_channels_parse() {
