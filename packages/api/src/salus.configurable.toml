@@ -1,0 +1,18 @@
+# What can be configured in Salus itself. The values are stored in salus.toml in the config directory.
+
+[[setting]]
+key = "plugins_dir"
+name = "Plugins directory"
+description = """Where plugins are installed. A relative path is taken relative to the config directory. \
+Empty means the plugins folder of the platform's data directory. Takes effect after Salus is restarted."""
+type = "directory-path"
+default = ""
+
+[[setting]]
+key = "theme"
+name = "Theme"
+description = """The colors of Salus and of all plugins. dark and light are the neutral themes; light-red has a red accent, dark-green a \\
+green one, dark-oled is pure black with purple surfaces and a bright green accent, and midnight a cyan accent on deep blue."""
+type = "choice"
+choices = ["dark", "light", "light-red", "dark-green", "dark-oled", "midnight"]
+default = "dark"
