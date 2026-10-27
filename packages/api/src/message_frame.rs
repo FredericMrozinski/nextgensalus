@@ -5,6 +5,14 @@ pub const HEADER_LEN: usize = 11;
 pub const MAX_FRAME_SIZE: usize = 64 * 1024 * 1024;
 pub const FLAG_MORE_FRAGMENTS: u8 = 0x01;
 pub const NO_FRONTEND: u32 = 0;
+
+/// Channel of the frame that tells every open page the theme changed (sent by the server, `NO_FRONTEND`);
+/// its payload is the new theme id as UTF-8.
+pub const THEME_CHANNEL: &str = "salus://theme";
+
+/// Channel of the frame the Salus page sends to a plugin frontend when its tab is shown or hidden; the payload is
+/// `shown` or `hidden` as UTF-8. The JavaScript SDK turns it into `onShown` / `onHidden`.
+pub const LIFECYCLE_CHANNEL: &str = "salus://lifecycle";
 pub const ALL_FRONTENDS: u32 = u32::MAX;
 
 #[derive(PartialEq, Clone, Serialize, Deserialize, Debug)]

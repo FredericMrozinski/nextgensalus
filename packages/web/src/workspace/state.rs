@@ -43,7 +43,6 @@ impl TabId {
 /// needs to change to support them.
 #[derive(Debug, Clone, PartialEq)]
 pub enum TabContent {
-    SamplePlugin,
     /// A frontend component of a plugin. Its frontend process already exists.
     Component(SpawnedComponent),
 }
@@ -51,38 +50,7 @@ pub enum TabContent {
 impl TabContent {
     fn default_title(&self) -> String {
         match self {
-            TabContent::SamplePlugin => String::from("Sample Plugin"),
             TabContent::Component(component) => component.title.clone(),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Theme {
-    Dark,
-    Light,
-}
-
-impl Theme {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Theme::Dark => "dark",
-            Theme::Light => "light",
-        }
-    }
-
-    pub fn parse(value: &str) -> Option<Self> {
-        match value {
-            "dark" => Some(Theme::Dark),
-            "light" => Some(Theme::Light),
-            _ => None,
-        }
-    }
-
-    pub fn toggled(self) -> Self {
-        match self {
-            Theme::Dark => Theme::Light,
-            Theme::Light => Theme::Dark,
         }
     }
 }
@@ -140,11 +108,8 @@ pub struct WorkspaceState {
     left_width: Signal<f64>,
     right_width: Signal<f64>,
     bottom_height: Signal<f64>,
-    /// Which panel's "+" button opened the plugin picker, if it's open.
-    /// Kept per-panel (rather than a bare bool) so a future version can open
-    /// the chosen plugin directly into the panel that requested it.
-    plugin_picker_target: Signal<Option<PanelId>>,
-    theme: Signal<Theme>,
+    /// Id of the active theme, as defined in `theme.css`.
+    theme: Signal<String>,
     viewer_picker: Signal<Option<ViewerPickerRequest>>,
 }
 
@@ -161,16 +126,8 @@ impl WorkspaceState {
             left_width: Signal::new(DEFAULT_LEFT_WIDTH),
             right_width: Signal::new(DEFAULT_RIGHT_WIDTH),
             bottom_height: Signal::new(DEFAULT_BOTTOM_HEIGHT),
-            plugin_picker_target: Signal::new(None),
-            theme: Signal::new(Theme::Dark),
+            theme: Signal::new("dark".to_string()),
             viewer_picker: Signal::new(None),
-        }
-    }
-
-    /// Seeds every panel with a single demo tab so the layout isn't empty on first load.
-    pub fn seed_demo_tabs(&self) {
-        for id in PanelId::ALL {
-            self.open_tab(id, TabContent::SamplePlugin);
         }
     }
 
@@ -234,7 +191,6 @@ impl WorkspaceState {
 
         match removed.content {
             TabContent::Component(component) => Some(component.frontend_process_id),
-            TabContent::SamplePlugin => None,
         }
     }
 
@@ -284,13 +240,15 @@ impl WorkspaceState {
         false
     }
 
-    pub fn theme(&self) -> Theme {
-        *self.theme.read()
+    pub fn theme(&self) -> String {
+        self.theme.read().clone()
     }
 
-    pub fn set_theme(&self, theme: Theme) {
+    pub fn set_theme(&self, theme: String) {
         let mut signal = self.theme;
-        signal.set(theme);
+        if *signal.peek() != theme {
+            signal.set(theme);
+        }
     }
 
     pub fn viewer_picker(&self) -> Option<ViewerPickerRequest> {
@@ -309,20 +267,6 @@ impl WorkspaceState {
         if let Some(request) = request {
             request.answer(choice);
         }
-    }
-
-    pub fn plugin_picker_target(&self) -> Option<PanelId> {
-        *self.plugin_picker_target.read()
-    }
-
-    pub fn open_plugin_picker(&self, panel_id: PanelId) {
-        let mut target = self.plugin_picker_target;
-        target.set(Some(panel_id));
-    }
-
-    pub fn close_plugin_picker(&self) {
-        let mut target = self.plugin_picker_target;
-        target.set(None);
     }
 
     pub fn left_width(&self) -> f64 {

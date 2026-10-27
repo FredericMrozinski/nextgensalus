@@ -47,17 +47,13 @@ import salus_sdk as salus
       merge_init_into_class: true
       show_if_no_docstring: true
       members:
-        - path
-        - path_of
-        - exists
-        - read_bytes
-        - read_text
-        - read_json
-        - write_bytes
-        - write_text
-        - write_json
-        - list
-        - delete
+        - all
+        - all_blocking
+        - get
+        - get_blocking
+        - set
+        - update
+        - reset
 
 ::: salus_sdk.Request
     options:

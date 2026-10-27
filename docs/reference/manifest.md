@@ -41,7 +41,7 @@ plugins = ["org.salus.imageviewer"]
 
 ## `[description]` (required)
 
-All values are strings and all keys are required.
+All values are strings. All keys are required except `icon`.
 
 | Key | Meaning |
 |---|---|
@@ -50,13 +50,14 @@ All values are strings and all keys are required.
 | `developer` | Who wrote it. |
 | `contact` | How to reach the developer. |
 | `version` | Your plugin's version string. |
+| `icon` | Optional. A `.png` or `.svg` file, as a path relative to the plugin folder (no `..`), shown in the dock on the left edge of Salus. Salus puts it in a rounded blue square and draws it as a silhouette (white or black, whichever suits the theme), so only its shape and transparency matter, not its colors. Without it the square shows the first letter of `name`. |
 
 ## `[meta]` (required)
 
 | Key | Meaning |
 |---|---|
 | `api-version` | Must be `3`. |
-| `entry-component` | Optional. The `component-name` of the component that opens when a user picks the plugin from the **+** list. **Only plugins with this key appear in that list**; without it the plugin can only be opened by other plugins or by Salus (for example a pure [file viewer](../guides/file-viewers.md)). It must name a declared component. |
+| `entry-component` | Optional. The `component-name` of the component that opens when a user clicks the plugin in the dock. **Only plugins with this key can be opened from the dock**; without it the plugin can only be opened by other plugins or by Salus (for example a pure [file viewer](../guides/file-viewers.md)). It must name a declared component. |
 
 ## `[backend]` (required)
 
@@ -67,7 +68,7 @@ All values are strings and all keys are required.
 
 All components of one plugin instance share one backend: a component opened by another component of the same plugin always connects to its opener's backend.
 
-| `lifetime` | A frontend opened from the **+** list, as a dependency or for a file connects to... | The backend ends... |
+| `lifetime` | A frontend opened from the dock, as a dependency or for a file connects to... | The backend ends... |
 |---|---|---|
 | `panel` | a **new** backend | when its **last frontend is closed** (tab closed, or the browser page closed or reloaded) |
 | `session` | the **user's running** backend of this plugin, or starts one | not when frontends close; it keeps running (until Salus stops) |
@@ -85,11 +86,17 @@ A plugin's user interface is made of one or more **frontend components**: separa
 |---|---|
 | `component-name` | Required. Unique within the plugin, lowercase letters, digits, `-` and `_`. How you refer to the component in code and in `entry-component`. |
 | `entrypoint` | Required. The HTML file shown in the iframe, relative to the plugin folder. |
-| `target-panel` | Required. Where the component opens when Salus (not the user) opens it: `"left"`, `"center"`, `"right"` or `"bottom"`. A component picked from the **+** list opens in the panel whose **+** was clicked. |
+| `target-panel` | Required. Where the component opens when Salus (not the user) opens it: `"left"`, `"center"`, `"right"` or `"bottom"`. A plugin opened from the dock opens its entry component in that component's `target-panel`. |
 | `title` | Optional. The tab label. Defaults to the plugin's `name`. Useful when several components of one plugin would otherwise have identical tabs. |
 | `file_viewer_for` | Optional. Array of file extensions this component can display, lowercase and without a dot, e.g. `["svs", "tif"]`. See [File viewers](../guides/file-viewers.md). |
 
 At least one component is required.
+
+## `[config]` (optional)
+
+| Key | Meaning |
+|---|---|
+| `configurable` | Path of the plugin's *configurable* file, relative to the plugin folder (no `..`). It defines the settings users can change and your plugin can read. See [Settings](../guides/config.md). The file is read when the plugin loads; if it is missing or invalid, the plugin does not load. |
 
 ## `[dependencies]` (optional)
 

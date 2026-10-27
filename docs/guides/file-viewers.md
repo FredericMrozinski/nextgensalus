@@ -34,7 +34,7 @@ target-panel = "center"
 file_viewer_for = ["svs", "tif", "tiff"]
 ```
 
-Extensions are lowercase and have no dot. A viewer-only plugin usually has no `entry-component`, so it is not in the **+** list; it opens only when a file is opened.
+Extensions are lowercase and have no dot. A viewer-only plugin usually has no `entry-component`, so its dock icon is disabled; it opens only when a file is opened.
 
 When Salus opens your component for a file, the file is in the page's parameters:
 

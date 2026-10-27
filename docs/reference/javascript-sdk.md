@@ -30,10 +30,11 @@ Creates the connection. Throws `SalusError` if the page is not inside a Salus if
 |---|---|
 | `salus.frontendId` | Id of this frontend instance. |
 | `salus.http` | An [`Http`](#http) helper bound to this frontend. |
-| `salus.config` | The plugin's [config directory](../guides/config.md): `readText/readJson/readBytes`, `writeText/writeJson/writeBytes`, `exists`, `list`, `delete`. |
+| `salus.config` | The plugin's [settings](../guides/config.md): `all`, `get`, `set`, `update`, `reset`. |
 | `salus.component` | This frontend's `component-name` from the manifest (`null` if unknown). |
 | `salus.params` | What this component was opened with: the `params` of `openComponent`/`openDependency`, or `{file}` for a [file viewer](../guides/file-viewers.md). `null` if none. |
 | `salus.parent` | `Peer` of the frontend that opened this one, or `null`. |
+| `salus.visible` | Whether this component's tab is the one the user sees in its panel; `null` until Salus has said so. |
 
 ### Methods
 
@@ -49,6 +50,10 @@ Creates the connection. Throws `SalusError` if the page is not inside a Salus if
 | `openFile(path)` → `Promise<void>` | Asks Salus to open a file in a [viewer](../guides/file-viewers.md); Salus picks or asks the user. Rejects with `SalusError` if there is no viewer or the user cancels. |
 | `peer(frontendId)` → `Peer` | Handle for a related frontend. |
 | `request(topic, params?, {timeout}?)` → `Promise<{meta, body}>` | Request to the framework on `salus://<topic>`. Rejects with `SalusError` or `SalusTimeout` (default 15 s). |
+| `onSpawn(handler)` → `() => void` | The component has started. Once. See [Tab events](../guides/components.md#reacting-to-tabs-being-shown-and-hidden). |
+| `onShown(handler)` → `() => void` | The user switched to this component's tab. |
+| `onHidden(handler)` → `() => void` | The user switched to another tab of the panel. |
+| `onDestroyed(handler)` → `() => void` | The component is closed. Synchronous, quick work only. |
 | `close()` | Stops listening and closes all channels. |
 
 `data` is a `Sendable`: a `Payload`, a string (sent as UTF-8), `Uint8Array`, `ArrayBuffer`, a typed array or an array of bytes.

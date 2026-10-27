@@ -6,6 +6,7 @@ mod config_loader;
 #[cfg(feature = "server")]
 mod plugin_loader;
 pub mod models;
+pub mod configurable;
 pub mod base_url;
 
 #[cfg(feature = "server")]
@@ -38,6 +39,9 @@ mod http_gateway;
 #[cfg(feature = "server")]
 mod plugin_config_api;
 
+#[cfg(feature = "server")]
+mod settings_api;
+
 pub mod framework_web_api;
 
 #[cfg(feature = "server")]
@@ -66,13 +70,11 @@ pub fn run_server(app: fn() -> Element) {
             .route("/plugin-api/{fe_pid}/{*path}", routing::any(http_gateway::handle))
             .layer(axum::extract::DefaultBodyLimit::max(32 * 1024 * 1024));
 
-        // Plugin frontends read and write their plugin's config directory through here.
+        // Plugin frontends read and change their plugin's settings through here; the settings plugin reaches everyone's.
         let plugin_config = axum::Router::new()
-            .route("/plugin-config/{fe_pid}", routing::any(plugin_config_api::handle_root))
-            .route("/plugin-config/{fe_pid}/{*path}", routing::any(plugin_config_api::handle))
-            .layer(axum::extract::DefaultBodyLimit::max(
-                config_loader::framework_config().plugin_config_max_file_bytes as usize,
-            ));
+            .route("/plugin-config/{fe_pid}", routing::any(plugin_config_api::handle))
+            .route("/settings-api/{fe_pid}/{*path}", routing::any(settings_api::handle))
+            .layer(axum::extract::DefaultBodyLimit::max(1024 * 1024));
 
         // Our routes are added to the Dioxus application *before* it is put under the base path, so that
         // they live under the same prefix as the assets and the server functions.

@@ -33,6 +33,8 @@ const PEER_PREFIX = "peer://";
 // Sent by a dependency to its parent once it has loaded, so `openDependency` can resolve only
 // when messages to the dependency will actually arrive.
 const READY_CHANNEL = "salus.ready";
+// Sent by the Salus page to a frontend when its tab is shown or hidden; the payload is "shown" or "hidden".
+const LIFECYCLE_CHANNEL = "salus://lifecycle";
 const DEFAULT_REQUEST_TIMEOUT = 15_000;
 
 // Largest payload sent in a single frame. Bigger messages are fragmented. The limit is far
@@ -814,20 +816,20 @@ function parentIdFromUrl(win) {
  */
 
 // ---------------------------------------------------------------------------
-// Config directory
+// Config
 // ---------------------------------------------------------------------------
 
 /**
- * The plugin's own config directory, managed by Salus (`salus.config`).
+ * The plugin's settings, managed by Salus (`salus.config`).
  *
- * Every plugin gets one directory (below Salus' config root, next to `salus.toml`) that survives
- * restarts and updates of the plugin. The frontend works on it through this class; the backend reads
- * and writes the same files directly (`plugin.config` in the Python SDK). All names are paths relative
- * to the directory, written with `/` (`"cache/index.json"`); parent directories are created on write.
- * Names that would leave the directory (`..`, absolute paths) throw a `TypeError`.
+ * What can be configured is defined in the plugin's *configurable* file (named under `[config]` in the
+ * manifest): key, type, default, display name and explanation of every setting. The values live in one
+ * config file that Salus keeps for the plugin and that the user can change in the settings. A setting
+ * that was never set reads as its default (or `undefined` if it has none).
  *
- * The directory belongs to the plugin, not to a user: all users of a plugin share it. Writes replace
- * the file atomically. Failures other than a missing file throw `HttpError`.
+ * Values are checked against the configurable: `set` rejects with `HttpError` (status 400, the reason in
+ * `body`) for an unknown key or a value of the wrong type or outside its limits. The settings belong to
+ * the plugin, not to a user: all users of a plugin share them.
  */
 export class Config {
   #base;
@@ -839,122 +841,68 @@ export class Config {
     this.#fetch = fetchFn;
   }
 
-  /** @param {string} name */
-  #url(name, directory = false) {
-    if (typeof name !== "string") throw new TypeError(`config path must be a string: ${String(name)}`);
-    const parts = name === "" ? [] : name.split("/");
-    for (const part of parts) {
-      if (part === "" || part === "." || part === ".." || /[\\\0:]/.test(part)) {
-        throw new TypeError(`invalid config path: ${JSON.stringify(name)}`);
-      }
-    }
-    const path = parts.map(encodeURIComponent).join("/");
-    return path === "" ? this.#base : `${this.#base}/${path}${directory ? "/" : ""}`;
-  }
-
-  async #send(method, url, body) {
+  async #send(method, body) {
     const init = { method, credentials: "same-origin", headers: {} };
-    if (body !== undefined) init.body = body;
-    return this.#fetch(url, init);
-  }
-
-  async #check(response) {
-    if (response.ok) return response;
-    let body;
-    try {
-      body = await response.text();
-    } catch {
-      body = undefined;
+    if (body !== undefined) {
+      init.body = JSON.stringify(body);
+      init.headers["content-type"] = "application/json";
     }
-    throw new HttpError(response, body);
+    const response = await this.#fetch(this.#base, init);
+    if (!response.ok) {
+      let text;
+      try {
+        text = await response.text();
+      } catch {
+        text = undefined;
+      }
+      throw new HttpError(response, text);
+    }
+    return loads(await response.text());
   }
 
   /**
-   * Content of a file, or `null` if it does not exist.
-   * @param {string} name
-   * @returns {Promise<Uint8Array | null>}
+   * All settings that have a value (set, or with a default).
+   * @returns {Promise<Record<string, unknown>>}
    */
-  async readBytes(name) {
-    const response = await this.#send("GET", this.#url(name));
-    if (response.status === 404) return null;
-    return new Uint8Array(await (await this.#check(response)).arrayBuffer());
+  all() {
+    return this.#send("GET");
   }
 
   /**
-   * Content of a text file, or `null` if it does not exist.
-   * @param {string} name
-   * @returns {Promise<string | null>}
-   */
-  async readText(name) {
-    const bytes = await this.readBytes(name);
-    return bytes === null ? null : textDecoder.decode(bytes);
-  }
-
-  /**
-   * Parsed JSON file; `fallback` (default `null`) if it does not exist.
-   * @param {string} name
+   * The value of a setting; `fallback` if it has neither a value nor a default.
+   * @param {string} key
    * @param {unknown} [fallback]
    */
-  async readJson(name, fallback = null) {
-    const text = await this.readText(name);
-    return text === null ? fallback : loads(text);
+  async get(key, fallback = undefined) {
+    const values = await this.all();
+    return Object.hasOwn(values, key) ? values[key] : fallback;
   }
 
   /**
-   * Writes a file (replacing it). Strings are stored as UTF-8.
-   * @param {string} name
-   * @param {string | Uint8Array | ArrayBuffer | Blob | Payload} data
-   */
-  async writeBytes(name, data) {
-    if (name === "") throw new TypeError("a file name is required");
-    await this.#check(await this.#send("PUT", this.#url(name), data instanceof Payload ? data.asBytes() : data));
-  }
-
-  /**
-   * @param {string} name
-   * @param {string} text
-   */
-  writeText(name, text) {
-    return this.writeBytes(name, textEncoder.encode(text));
-  }
-
-  /**
-   * @param {string} name
+   * @param {string} key
    * @param {unknown} value
    */
-  writeJson(name, value) {
-    return this.writeText(name, JSON.stringify(value, null, 2));
+  async set(key, value) {
+    if (value === undefined || value === null) throw new TypeError("use reset(key) to go back to the default");
+    await this.update({ [key]: value });
   }
 
   /**
-   * Whether a file or directory exists.
-   * @param {string} name
+   * Sets several settings at once (all or none). `null` resets a setting to its default.
+   * Resolves with all settings afterwards.
+   * @param {Record<string, unknown>} values
+   * @returns {Promise<Record<string, unknown>>}
    */
-  async exists(name) {
-    if (name === "") return true;
-    const parent = name.includes("/") ? name.slice(0, name.lastIndexOf("/")) : "";
-    const leaf = name.slice(name.lastIndexOf("/") + 1);
-    const names = await this.list(parent);
-    return names.includes(leaf) || names.includes(`${leaf}/`);
+  update(values) {
+    return this.#send("PUT", values);
   }
 
   /**
-   * Names in a directory, sorted; directories end with `/`. A directory that does not exist is empty.
-   * @param {string} [directory]
-   * @returns {Promise<string[]>}
+   * Back to the default.
+   * @param {string} key
    */
-  async list(directory = "") {
-    const response = await this.#check(await this.#send("GET", `${this.#url(directory)}${directory === "" ? "?list" : "/?list"}`));
-    return (await response.json()).map((entry) => (entry.is_dir ? `${entry.name}/` : entry.name));
-  }
-
-  /**
-   * Deletes a file, or a directory with everything in it. Throws `HttpError` (404) if it does not exist.
-   * @param {string} name
-   */
-  async delete(name) {
-    if (name === "") throw new TypeError("cannot delete the config directory itself");
-    await this.#check(await this.#send("DELETE", this.#url(name)));
+  async reset(key) {
+    await this.update({ [key]: null });
   }
 }
 
@@ -978,6 +926,12 @@ export class Salus {
   #nextMessageId = 0;
   #listener;
   #closed = false;
+  #lifecycle = { spawn: new Set(), shown: new Set(), hidden: new Set(), destroyed: new Set() };
+  #spawned = false;
+  #destroyed = false;
+  #visible = null;
+  #queuedVisibility = []; // "shown"/"hidden" that arrived before onSpawn was delivered
+  #pagehide;
 
   /** @param {SalusOptions} [options] */
   constructor(options = {}) {
@@ -1011,6 +965,12 @@ export class Salus {
 
     this.#listener = (event) => this.#onWindowMessage(event);
     win.addEventListener("message", this.#listener);
+
+    // The page is going away (the tab was closed, or Salus was reloaded).
+    this.#pagehide = () => this.#destroy();
+    win.addEventListener("pagehide", this.#pagehide);
+    // After the plugin's own startup code ran and registered its handlers.
+    setTimeout(() => this.#spawn(), 0);
 
     if (this.#parentId !== null) {
       // After the plugin's own startup code ran and registered its channels.
@@ -1260,11 +1220,113 @@ export class Salus {
     return () => this.#unclaimed.delete(handler);
   }
 
+  // -------------------------------------------------------------------------
+  // Lifecycle: onSpawn -> onShown -> onHidden (any number of times) -> onDestroyed
+  // -------------------------------------------------------------------------
+
+  /**
+   * Whether the tab of this component is the one the user currently sees in its panel. `null` until Salus
+   * has said so (a moment after the page loaded).
+   * @returns {boolean | null}
+   */
+  get visible() {
+    return this.#visible;
+  }
+
+  /**
+   * The component has started: the page loaded and this SDK is connected. Called once, after the code that
+   * registered the handler has finished, so `Salus.connect()` followed by `onSpawn(...)` always works. A handler
+   * registered later is called right away.
+   * @param {() => void | Promise<void>} handler
+   * @returns {() => void} unsubscribe
+   */
+  onSpawn(handler) {
+    return this.#subscribe("spawn", handler, this.#spawned && !this.#destroyed);
+  }
+
+  /**
+   * The user switched to the tab of this component (also when it opens in the foreground). A handler registered
+   * while the tab is shown is called right away.
+   * @param {() => void | Promise<void>} handler
+   * @returns {() => void} unsubscribe
+   */
+  onShown(handler) {
+    return this.#subscribe("shown", handler, this.#visible === true && !this.#destroyed);
+  }
+
+  /**
+   * The user switched to another tab of the same panel (also when the component opens in the background).
+   * The page stays loaded and keeps running. A handler registered while the tab is hidden is called right away.
+   * @param {() => void | Promise<void>} handler
+   * @returns {() => void} unsubscribe
+   */
+  onHidden(handler) {
+    return this.#subscribe("hidden", handler, this.#visible === false && !this.#destroyed);
+  }
+
+  /**
+   * The component is closed (its tab was closed, or the page unloads). Handlers run synchronously while the page
+   * unloads, so only quick, synchronous work is safe: send a message to another component with
+   * `peer.send(...)`, but do not wait for answers.
+   * @param {() => void} handler
+   * @returns {() => void} unsubscribe
+   */
+  onDestroyed(handler) {
+    return this.#subscribe("destroyed", handler, false);
+  }
+
+  #subscribe(kind, handler, replay) {
+    if (typeof handler !== "function") throw new TypeError(`on${kind[0].toUpperCase()}${kind.slice(1)} needs a function`);
+    this.#lifecycle[kind].add(handler);
+    if (replay) queueMicrotask(() => this.#lifecycle[kind].has(handler) && this.#call(kind, handler));
+    return () => this.#lifecycle[kind].delete(handler);
+  }
+
+  #call(kind, handler) {
+    try {
+      const result = handler();
+      if (result && typeof result.catch === "function") result.catch((e) => console.error(`Salus: on${kind} handler failed`, e));
+    } catch (e) {
+      console.error(`Salus: on${kind} handler failed`, e);
+    }
+  }
+
+  #emit(kind) {
+    for (const handler of [...this.#lifecycle[kind]]) this.#call(kind, handler);
+  }
+
+  #spawn() {
+    if (this.#spawned || this.#closed || this.#destroyed) return;
+    this.#spawned = true;
+    this.#emit("spawn");
+    // Visibility that Salus announced before the spawn was delivered keeps its place after it.
+    for (const state of this.#queuedVisibility.splice(0)) this.#setVisible(state === "shown");
+  }
+
+  #onLifecycleMessage(state) {
+    if (state !== "shown" && state !== "hidden") return;
+    if (!this.#spawned) this.#queuedVisibility.push(state);
+    else this.#setVisible(state === "shown");
+  }
+
+  #setVisible(visible) {
+    if (this.#destroyed || this.#visible === visible) return;
+    this.#visible = visible;
+    this.#emit(visible ? "shown" : "hidden");
+  }
+
+  #destroy() {
+    if (this.#destroyed) return;
+    this.#destroyed = true;
+    this.#emit("destroyed");
+  }
+
   /** Stops listening and closes all channels. */
   close() {
     if (this.#closed) return;
     this.#closed = true;
     this.#window.removeEventListener("message", this.#listener);
+    this.#window.removeEventListener("pagehide", this.#pagehide);
     for (const pending of this.#pending.values()) {
       clearTimeout(pending.timer);
       pending.reject(new SalusError("connection is closed"));
@@ -1298,6 +1360,14 @@ export class Salus {
   }
 
   #route(message) {
+    if (message.channel === LIFECYCLE_CHANNEL) {
+      try {
+        this.#onLifecycleMessage(Payload._wrap(message.payload).asStr());
+      } catch {
+        // not a lifecycle state we know
+      }
+      return;
+    }
     if (message.channel.startsWith(SALUS_PREFIX) && this.#handleControlReply(message)) return;
 
     const peer = parsePeerChannel(message.channel);

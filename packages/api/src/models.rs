@@ -1,3 +1,4 @@
+use crate::configurable::Configurable;
 use serde::{Deserialize, Serialize};
 
 #[derive(PartialEq, Clone, Serialize, Deserialize, Debug)]
@@ -7,6 +8,8 @@ pub struct PluginDescription {
     pub description: String,
     pub version: String,
     pub contact: String,
+    /// Icon file (png or svg), relative to the plugin folder.
+    pub icon: Option<String>,
 }
 
 #[derive(PartialEq, Clone, Serialize, Deserialize, Debug)]
@@ -78,6 +81,9 @@ pub struct PluginManifest {
 pub struct Plugin {
     pub manifest: PluginManifest,
     pub plugin_folder_name: String,
+    /// What can be configured in the plugin (the file named under `[config]` in the manifest). Server side only.
+    #[serde(skip)]
+    pub configurable: Option<Configurable>,
 }
 
 // #[derive(PartialEq, Clone, Serialize, Deserialize, Debug)]

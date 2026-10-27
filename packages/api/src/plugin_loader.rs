@@ -1,3 +1,4 @@
+use crate::configurable::Configurable;
 use crate::models;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -109,6 +110,7 @@ fn parse_manifest(manifest: &str, plugin_folder_name: &str) -> Result<models::Pl
         developer: parse_str(&parsed_manifest, "description", "developer")?,
         contact: parse_str(&parsed_manifest, "description", "contact")?,
         version: parse_str(&parsed_manifest, "description", "version")?,
+        icon: parse_icon(&parsed_manifest)?,
     };
 
     // Parse backend information
@@ -136,6 +138,7 @@ fn parse_manifest(manifest: &str, plugin_folder_name: &str) -> Result<models::Pl
     }
 
     let dependencies = parse_dependencies(&parsed_manifest)?;
+    let configurable = parse_configurable(&parsed_manifest, plugin_folder_name)?;
 
     Ok(models::Plugin {
         manifest: models::PluginManifest {
@@ -146,7 +149,49 @@ fn parse_manifest(manifest: &str, plugin_folder_name: &str) -> Result<models::Pl
             dependencies,
         },
         plugin_folder_name: plugin_folder_name.to_string(),
+        configurable,
     })
+}
+
+/// Optional `[config]` table: `configurable = "configurable.toml"` names the file (inside the plugin folder)
+/// that defines the plugin's settings. The file is read now, so a broken one stops the plugin from loading.
+fn parse_configurable(manifest: &Table, plugin_folder: &str) -> Result<Option<Configurable>, ManifestError> {
+    let Some(config) = manifest.get("config") else {
+        return Ok(None);
+    };
+    let config = config.as_table().ok_or_else(|| bad("'[config]' must be a table.".to_string()))?;
+    if let Some(unknown) = config.keys().find(|key| key.as_str() != "configurable") {
+        return Err(bad(format!("[config]: unknown key '{unknown}'.")));
+    }
+    let Some(file) = config.get("configurable") else {
+        return Ok(None);
+    };
+    let file = file.as_str().ok_or_else(|| bad("[config]: 'configurable' needs to carry a string value.".to_string()))?;
+    if !Path::new(file).components().all(|c| matches!(c, std::path::Component::Normal(_))) {
+        return Err(bad(format!(
+            "[config]: configurable '{file}' must be a path inside the plugin folder (relative, without '..').")));
+    }
+    let path = Path::new(plugin_folder).join(file);
+    let text = fs::read_to_string(&path)
+        .map_err(|e| bad(format!("[config]: cannot read configurable '{}': {e}", path.display())))?;
+    Configurable::parse(&text).map(Some).map_err(|e| bad(format!("{}: {e}", path.display())))
+}
+
+/// Optional `icon` of `[description]`: a png or svg file inside the plugin folder.
+fn parse_icon(manifest: &Table) -> Result<Option<String>, ManifestError> {
+    let Some(value) = manifest["description"].as_table().and_then(|table| table.get("icon")) else {
+        return Ok(None);
+    };
+    let icon = value.as_str()
+        .ok_or_else(|| bad("[description]: 'icon' needs to carry a string value.".to_string()))?;
+    let path = Path::new(icon);
+    let inside_folder = path.components().all(|c| matches!(c, std::path::Component::Normal(_)));
+    let extension = path.extension().map(|e| e.to_string_lossy().to_lowercase());
+    if !inside_folder || !matches!(extension.as_deref(), Some("png" | "svg")) {
+        return Err(bad(format!(
+            "[description]: icon '{icon}' must be a .png or .svg file inside the plugin folder (a relative path without '..').")));
+    }
+    Ok(Some(icon.to_string()))
 }
 
 fn bad(message: String) -> ManifestError {
@@ -298,6 +343,58 @@ target-panel = "center"
         assert_eq!(component.target_panel, models::TargetPanel::Center);
         assert_eq!(component.title, None);
         assert!(component.file_viewer_for.is_empty());
+    }
+
+    #[test]
+    fn configurable_is_read_from_the_plugin_folder() {
+        let folder = std::env::temp_dir().join(format!("salus-loader-test-{}", std::process::id()));
+        std::fs::create_dir_all(&folder).unwrap();
+        std::fs::write(folder.join("configurable.toml"),
+            "[[setting]]\nkey = \"zoom\"\nname = \"Zoom\"\ntype = \"float\"\ndefault = 1.5\n").unwrap();
+        std::fs::write(folder.join("broken.toml"), "[[setting]]\nkey = \"zoom\"\n").unwrap();
+        let folder_name = folder.to_str().unwrap();
+
+        let with = |file: &str| parse_manifest(&manifest("", &format!("{MAIN}\n[config]\nconfigurable = \"{file}\"\n")), folder_name);
+        let plugin = with("configurable.toml").unwrap();
+        assert_eq!(plugin.configurable.unwrap().setting("zoom").unwrap().default, Some(serde_json::json!(1.5)));
+        assert!(with("missing.toml").is_err());
+        assert!(with("broken.toml").is_err());
+        assert!(with("../x.toml").is_err());
+        assert!(parse_manifest(&manifest("", MAIN), folder_name).unwrap().configurable.is_none());
+        let _ = std::fs::remove_dir_all(&folder);
+    }
+
+    #[test]
+    fn the_example_plugins_load() {
+        let examples = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/plugins");
+        let mut loaded = 0;
+        for entry in std::fs::read_dir(examples).unwrap() {
+            let folder = entry.unwrap().path();
+            let Ok(text) = std::fs::read_to_string(folder.join("manifest.toml")) else { continue };
+            let plugin = parse_manifest(&text, folder.to_str().unwrap())
+                .unwrap_or_else(|e| panic!("{}: {e}", folder.display()));
+            if let Some(icon) = &plugin.manifest.description.icon {
+                assert!(folder.join(icon).is_file(), "{}: icon {icon} is missing", folder.display());
+            }
+            loaded += 1;
+        }
+        assert!(loaded >= 4, "found only {loaded} example plugins");
+    }
+
+    #[test]
+    fn icon_is_optional_and_checked() {
+        let plugin = parse_manifest(&manifest("", MAIN), "/plugins/x").unwrap();
+        assert_eq!(plugin.manifest.description.icon, None);
+
+        let with_icon = |icon: &str| {
+            let text = manifest("", MAIN).replace("name = \"N\"", &format!("name = \"N\"\nicon = \"{icon}\""));
+            parse_manifest(&text, "/plugins/x")
+        };
+        assert_eq!(with_icon("assets/icon.SVG").unwrap().manifest.description.icon.as_deref(), Some("assets/icon.SVG"));
+        assert!(with_icon("icon.png").is_ok());
+        assert!(with_icon("icon.jpg").is_err());
+        assert!(with_icon("../icon.png").is_err());
+        assert!(with_icon("/etc/icon.png").is_err());
     }
 
     #[test]

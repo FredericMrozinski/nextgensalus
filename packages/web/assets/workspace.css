@@ -2,16 +2,214 @@ html, body {
     margin: 0;
     padding: 0;
     height: 100%;
-    background-color: var(--salus-bg);
+    background-color: var(--salus-gap, var(--salus-bg));
+}
+
+/* Dioxus mounts into a single element, so the dock and the workspace share this wrapper. */
+.workspace-shell {
+    display: flex;
+    flex-direction: row;
+    height: 100vh;
+    width: 100vw;
+    overflow: hidden;
+}
+
+.dock {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+    flex-shrink: 0;
+    width: 56px;
+    box-sizing: border-box;
+    padding: 10px 8px;
+    height: 100vh;
+    overflow: hidden;
+    transition: width 0.15s ease;
+    border-right: 1px solid var(--salus-border);
+    background-color: var(--salus-surface-alt);
+}
+
+/* Glow: a blurred dot of the accent color sits behind the "all plugins" button and radiates up and down.
+   Delete these blocks to get the flat dock back. */
+.dock {
+    position: relative;
+    isolation: isolate;
+}
+
+/* Hover light: a diffuse light source of the accent color follows the mouse from icon to icon. */
+.dock::before {
+    content: "";
+    position: absolute;
+    z-index: -1;
+    left: var(--hover-x, 50%);
+    top: var(--hover-y, 0);
+    width: 100px;
+    height: 100px;
+    transform: translate(-50%, -50%);
+    background: radial-gradient(closest-side,
+        color-mix(in srgb, var(--salus-accent) 38%, transparent) 0%,
+        color-mix(in srgb, var(--salus-accent) 12%, transparent) 50%,
+        transparent 100%);
+    filter: blur(12px);
+    opacity: 0;
+    transition: opacity 0.2s ease, top 0.15s ease, left 0.15s ease;
+    pointer-events: none;
+}
+
+.dock-hovering::before {
+    opacity: 1;
+}
+
+/* Grain: fine noise over the whole dock (background and glow), below the icons. */
+.dock::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3CfeComponentTransfer%3E%3CfeFuncR type='linear' slope='3' intercept='-1'/%3E%3CfeFuncG type='linear' slope='3' intercept='-1'/%3E%3CfeFuncB type='linear' slope='3' intercept='-1'/%3E%3C/feComponentTransfer%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+    background-size: 160px 160px;
+    /* hard-light, not overlay: overlay hardly changes dark backgrounds, so the grain only showed in the glow */
+    mix-blend-mode: hard-light;
+    opacity: 0.07;
+    pointer-events: none;
+}
+
+.dock-launcher {
+    position: relative;
+}
+
+.dock-launcher::before {
+    content: "";
+    position: absolute;
+    z-index: -1;
+    /* centered on the icon, which sits at the left of the button (4px padding, 28px icon), also when the dock is expanded */
+    left: calc(4px + 14px);
+    top: 50%;
+    width: 150px;
+    height: 260px;
+    transform: translate(-50%, -50%);
+    background: radial-gradient(ellipse closest-side,
+        color-mix(in srgb, var(--salus-accent) 32%, transparent) 0%,
+        color-mix(in srgb, var(--salus-accent) 10%, transparent) 45%,
+        transparent 100%);
+    filter: blur(18px);
+    pointer-events: none;
+}
+
+.dock-expanded {
+    width: 240px;
+}
+
+.dock-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+}
+
+.dock-search {
+    box-sizing: border-box;
+    width: 100%;
+    flex-shrink: 0;
+    padding: 7px 10px;
+    border: 1px solid var(--salus-border);
+    border-radius: 8px;
+    background-color: var(--salus-surface);
+    color: var(--salus-fg);
+    font-size: 13px;
+    outline: none;
+}
+
+.dock-search:focus {
+    border-color: var(--salus-accent);
+}
+
+.dock-item {
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 10px;
+    flex-shrink: 0;
+    width: 100%;
+    min-height: 40px;
+    padding: 0 4px;
+    color: var(--salus-fg);
+    font-size: 13px;
+    text-align: left;
+    border: none;
+    border-radius: 10px;
+    background: transparent;
+    cursor: pointer;
+}
+
+.dock-item:disabled {
+    opacity: 0.45;
+    cursor: default;
+}
+
+.dock-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* Same tint as the silhouettes of the plugin icons: white or black, depending on the theme. */
+.dock-launcher {
+    color: var(--salus-icon-fg);
+}
+
+.dock-launcher-icon {
+    width: 28px;
+    height: 28px;
+    flex-shrink: 0;
+}
+
+/* Every plugin icon sits in the same rounded square: translucent accent fill, solid accent border. The image inside is
+   turned into a silhouette (the theme's icon color: white or black), so it looks right whatever colors the plugin's file has. */
+.dock-icon-frame {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-sizing: border-box;
+    width: 34px;
+    height: 34px;
+    padding: 5px;
+    overflow: hidden;
+    border: 1.5px solid var(--salus-accent);
+    border-radius: 9px;
+    background: color-mix(in srgb, var(--salus-accent) 28%, transparent);
+}
+
+.dock-icon {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    filter: var(--salus-icon-filter);
+}
+
+/* Stand-in for a plugin without an icon: the first letter of its name in the same square. */
+.dock-icon-letter {
+    color: var(--salus-icon-fg);
+    font-size: 15px;
+    font-weight: 600;
+    user-select: none;
 }
 
 .workspace-root {
     display: flex;
     flex-direction: column;
     height: 100vh;
-    width: 100vw;
+    flex: 1;
+    min-width: 0;
     overflow: hidden;
-    background-color: var(--salus-bg);
+    box-sizing: border-box;
+    padding: 6px; /* around the workspace: as wide as the drag bars (6px) between the panels */
+    background-color: var(--salus-gap, var(--salus-bg));
 }
 
 .workspace-main-row {
@@ -42,7 +240,6 @@ html, body {
     flex: 1;
     min-width: 0;
     min-height: 0;
-    margin: 4px;
     border: 1px solid var(--salus-border);
     border-radius: 6px;
     background-color: var(--salus-surface);
@@ -73,8 +270,10 @@ html, body {
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 6px 10px;
-    margin-right: 2px;
+    padding: 5px 10px 6px;
+    margin-right: 4px;
+    border: 1px solid var(--salus-border);
+    border-bottom: none;
     border-radius: 6px 6px 0 0;
     background-color: transparent;
     color: var(--salus-fg-muted);
@@ -87,7 +286,9 @@ html, body {
     background-color: var(--salus-surface-2);
 }
 
-.tab-active {
+.tab-active,
+.tab-active:hover {
+    border-color: var(--salus-accent);
     background-color: var(--salus-surface);
     color: var(--salus-fg);
 }
@@ -114,28 +315,6 @@ html, body {
 
 .tab-close:hover {
     background-color: var(--salus-surface-3);
-}
-
-.new-tab-button {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 24px;
-    height: 24px;
-    margin: 0 4px 4px 4px;
-    border: none;
-    border-radius: 4px;
-    background: transparent;
-    color: var(--salus-fg-muted);
-    cursor: pointer;
-    font-size: 16px;
-    line-height: 1;
-    flex-shrink: 0;
-}
-
-.new-tab-button:hover {
-    background-color: var(--salus-surface-2);
-    color: var(--salus-fg);
 }
 
 /* Panel content */
@@ -290,28 +469,3 @@ html, body {
     font-size: 11px;
 }
 
-/* Theme toggle */
-
-.theme-toggle {
-    position: fixed;
-    right: 12px;
-    bottom: 12px;
-    z-index: 900;
-    width: 28px;
-    height: 28px;
-    padding: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    border: 1px solid var(--salus-border);
-    border-radius: 50%;
-    background: var(--salus-surface-2);
-    color: var(--salus-fg);
-    cursor: pointer;
-    font-size: 14px;
-    line-height: 1;
-}
-
-.theme-toggle:hover {
-    background: var(--salus-surface-3);
-}

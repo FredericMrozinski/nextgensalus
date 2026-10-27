@@ -6,7 +6,7 @@ can put a browser in the left panel, a list on the right and an editor in the ce
 ```toml
 [meta]
 api-version = 3
-entry-component = "browser"          # what the "+" list opens
+entry-component = "browser"          # what the dock icon opens
 
 [[frontend-component]]
 component-name = "browser"
@@ -67,15 +67,48 @@ backend. Messages are not buffered: register channels when your page starts, bec
 Components that need to share *state* (a list that must refresh after an edit) can also go through the backend: it can broadcast to every
 attached component with `await app.send(data, channel="events", to=salus.ALL)`.
 
-## The "+" list and entry components
+## The dock and entry components
 
-Only a plugin's **entry component** (`entry-component` in `[meta]`) is offered when the user presses **+** on a panel. Other components are opened by your
-code. A plugin without an entry component does not appear in the list at all.
+Only a plugin's **entry component** (`entry-component` in `[meta]`) is opened when the user clicks the plugin in the dock. Other components are opened by your
+code. A plugin without an entry component still appears in the dock, but disabled.
 
 ## Tabs stay alive, closing ends a component
 
 All tabs of a panel stay loaded; only the selected one is visible. Switching tabs never reloads a component, so it keeps its state and can still receive
 messages while hidden.
+
+## Reacting to tabs being shown and hidden
+
+A component can find out what happens to its tab:
+
+```js
+const salus = Salus.connect();
+
+salus.onSpawn(() => { /* started: the page loaded and the SDK is connected */ });
+salus.onShown(() => { /* the user switched to this tab: refresh what may be out of date */ });
+salus.onHidden(() => { /* the user switched to another tab of the panel */ });
+salus.onDestroyed(() => { /* the tab was closed */ });
+```
+
+The order is `onSpawn`, then `onShown` / `onHidden` as often as the user switches, then `onDestroyed`. A component that opens in the background (as a
+dependency, say) starts with `onHidden`. Each `on…` call returns a function that removes the handler again, and `salus.visible` tells the current
+state (`true`, `false`, or `null` before Salus has said).
+
+- **`onSpawn` runs after your startup code**, so registering it right after `Salus.connect()` works. A handler registered later is called at once; the same is true
+  for `onShown` and `onHidden` when the tab is in that state already.
+- **The page keeps running while hidden.** Hiding does not stop timers, sockets or messages. Use `onHidden` to pause expensive work yourself.
+- **`onDestroyed` runs while the page unloads**, so it must be quick and synchronous. It is the moment to tell other components, with a message that needs no answer:
+
+```js
+const editor = await salus.openComponent("editor", { reuse: true });
+salus.onShown(() => editor.send("peer-visible", Payload.json(true)));
+salus.onHidden(() => editor.send("peer-visible", Payload.json(false)));
+salus.onDestroyed(() => editor.send("peer-closed", ""));     // the last message of this component
+```
+
+  Messages from a closing component still reach the components of the same plugin (they are delivered inside the browser). They are not buffered and
+  not guaranteed: closing the whole browser window may unload the other components first.
+- **Errors in a handler** are logged to the console and do not affect the other handlers.
 
 Closing a tab (or closing or reloading the browser page) **ends that component's frontend process**: the backend gets a `detached` event, and a backend
 with `lifetime = "panel"` ends together with the plugin's last open component. A component reopened later is a fresh instance.

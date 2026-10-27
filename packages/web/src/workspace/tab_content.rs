@@ -3,52 +3,21 @@ use crate::frontend_communication_relay as relay;
 use api::framework_web_api;
 use api::models::SpawnedComponent;
 use dioxus::prelude::*;
-use std::path::PathBuf;
-
-const SAMPLE_PLUGIN_HTML: &str = r#"<!DOCTYPE html>
-<html>
-<head>
-<meta charset="utf-8" />
-<style>
-  body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; padding: 24px; background: #1b1e25; color: #e6e6e6; }
-  h1 { font-size: 18px; margin-top: 0; }
-  p { color: #a9adba; }
-</style>
-</head>
-<body>
-  <h1>Sample Plugin</h1>
-  <p>This is placeholder content rendered inside an iframe.</p>
-</body>
-</html>"#;
 
 /// Dispatches a tab's `TabContent` to the component that renders it. This is
 /// the extension point for new kinds of tabs: add a variant to `TabContent` and a match
 /// arm here without touching `Panel` or `TabBar`.
 #[component]
-pub fn TabContentView(content: TabContent) -> Element {
+pub fn TabContentView(content: TabContent, active: bool) -> Element {
     match content {
-        TabContent::SamplePlugin => rsx! { SamplePluginFrame {} },
-        TabContent::Component(component) => rsx! { PluginFrame { component } },
-    }
-}
-
-#[component]
-fn SamplePluginFrame() -> Element {
-    rsx! {
-        iframe {
-            class: "plugin-frame",
-            title: "Sample Plugin",
-            srcdoc: SAMPLE_PLUGIN_HTML,
-            width: "100%",
-            height: "100%",
-        }
+        TabContent::Component(component) => rsx! { PluginFrame { component, active } },
     }
 }
 
 /// Shows the iframe of one frontend component. The frontend process already exists
 /// (the server spawned it before the tab was opened).
 #[component]
-pub fn PluginFrame(component: SpawnedComponent) -> Element {
+pub fn PluginFrame(component: SpawnedComponent, active: bool) -> Element {
     let workspace = use_context::<WorkspaceState>();
     let plugin_id = component.plugin_id;
     let pid = component.frontend_process_id;
@@ -63,6 +32,18 @@ pub fn PluginFrame(component: SpawnedComponent) -> Element {
         move || relay::register_frontend(pid, plugin_id, component_name)
     });
     use_drop(move || relay::unregister_frontend(pid));
+
+    // Tell the page when its tab is shown or hidden (`onShown` / `onHidden` in the SDK), once it has loaded.
+    // `loads` counts how often the iframe loaded: a page that navigates or reloads starts without knowing its state.
+    let mut loads = use_signal(|| 0u32);
+    let mut announced = use_signal(|| None::<(u32, bool)>);
+    use_effect(use_reactive!(|active| {
+        let loads = loads();
+        if loads > 0 && *announced.peek() != Some((loads, active)) {
+            announced.set(Some((loads, active)));
+            relay::send_lifecycle(pid, if active { "shown" } else { "hidden" });
+        }
+    }));
 
     rsx! {
         match &*plugin.read() {
@@ -98,7 +79,10 @@ pub fn PluginFrame(component: SpawnedComponent) -> Element {
                         class: "plugin-frame",
                         src: api::base_url::with_base(&format!("/plugins/{entrypoint}?{query}")),
                         // Injects the theme stylesheet and sets the page's theme once the plugin has loaded.
-                        onload: move |_| relay::apply_theme(pid, workspace.theme().as_str()),
+                        onload: move |_| {
+                            relay::apply_theme(pid, &workspace.theme());
+                            loads += 1;
+                        },
                         width: "100%",
                         height: "100%",
                         style: "border: none;",

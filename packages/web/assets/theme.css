@@ -1,9 +1,12 @@
 /*
  * Salus theme for plugin frontends.
  *
- * Salus injects this stylesheet into every plugin page and sets data-theme="dark" or "light" on its
- * <html> element, and switches it when the user changes the theme. Use the variables in your own CSS,
- * e.g.  background: var(--salus-surface);  and your plugin follows the theme without any code.
+ * Salus injects this stylesheet into every plugin page and sets the data-theme attribute of its <html>
+ * element, and switches it when the user picks another theme in the settings. Use the variables in your own
+ * CSS, e.g.  background: var(--salus-surface);  and your plugin follows the theme without any code.
+ *
+ * Themes: dark (the default), light, light-red, dark-green, dark-oled, midnight. To add one, add a block below and its
+ * id to the choices of `theme` in packages/api/src/salus.configurable.toml (a test checks that they match).
  *
  * Everything below is in a cascade layer, so ANY unlayered CSS of a plugin overrides it.
  */
@@ -27,26 +30,124 @@
     --salus-success: #4cc38a;
     --salus-overlay: rgba(8, 9, 12, 0.5);
     --salus-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+    --salus-gap: #0b0c10; /* between the panels of the workspace */
+    --salus-icon-filter: brightness(0) invert(1);
+    --salus-icon-fg: #fff;
   }
 
   :root[data-theme="light"] {
     color-scheme: light;
-    --salus-bg: #eceef2;
+    --salus-bg: #ececec;
     --salus-surface: #ffffff;
-    --salus-surface-alt: #f3f4f7;
-    --salus-surface-2: #e8ebf0;
-    --salus-surface-3: #d8dce4;
-    --salus-border: #d3d7df;
-    --salus-fg: #1b1e25;
-    --salus-fg-muted: #4d5361;
-    --salus-fg-faint: #8a90a0;
-    --salus-accent: #2f5fd6;
+    --salus-surface-alt: #f4f4f4;
+    --salus-surface-2: #e8e8e8;
+    --salus-surface-3: #d9d9d9;
+    --salus-border: #d4d4d4;
+    --salus-fg: #1c1c1c;
+    --salus-fg-muted: #505050;
+    --salus-fg-faint: #8c8c8c;
+    --salus-accent: #7c3aed;
     --salus-accent-fg: #ffffff;
     --salus-danger: #c9302c;
     --salus-warning: #b86e00;
     --salus-success: #1a7f4b;
-    --salus-overlay: rgba(30, 34, 44, 0.35);
-    --salus-shadow: 0 12px 32px rgba(30, 34, 44, 0.2);
+    --salus-overlay: rgba(30, 30, 30, 0.35);
+    --salus-shadow: 0 12px 32px rgba(30, 30, 30, 0.2);
+    --salus-gap: #d3d3d3; /* between the panels of the workspace */
+    --salus-icon-filter: brightness(0);
+    --salus-icon-fg: #000;
+  }
+
+  :root[data-theme="light-red"] {
+    color-scheme: light;
+    --salus-bg: #f4eded;
+    --salus-surface: #ffffff;
+    --salus-surface-alt: #f9f3f3;
+    --salus-surface-2: #f1e5e5;
+    --salus-surface-3: #e4d2d2;
+    --salus-border: #dccaca;
+    --salus-fg: #261b1b;
+    --salus-fg-muted: #5e4a4a;
+    --salus-fg-faint: #9a8686;
+    --salus-accent: #c8102e;
+    --salus-accent-fg: #ffffff;
+    --salus-danger: #8f1d1d;
+    --salus-warning: #b86e00;
+    --salus-success: #1a7f4b;
+    --salus-overlay: rgba(44, 24, 24, 0.35);
+    --salus-shadow: 0 12px 32px rgba(44, 24, 24, 0.2);
+    --salus-gap: #e6d8d8; /* between the panels of the workspace */
+    --salus-icon-filter: brightness(0);
+    --salus-icon-fg: #000;
+  }
+
+  :root[data-theme="dark-green"] {
+    color-scheme: dark;
+    --salus-bg: #101512;
+    --salus-surface: #161d18;
+    --salus-surface-alt: #141a16;
+    --salus-surface-2: #1e2822;
+    --salus-surface-3: #2b382f;
+    --salus-border: #25312a;
+    --salus-fg: #e3ebe5;
+    --salus-fg-muted: #a3b4a8;
+    --salus-fg-faint: #5d6f63;
+    --salus-accent: #3fb97a;
+    --salus-accent-fg: #06140c;
+    --salus-danger: #ff6369;
+    --salus-warning: #f5a524;
+    --salus-success: #4cc38a;
+    --salus-overlay: rgba(6, 10, 8, 0.55);
+    --salus-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+    --salus-gap: #0a0d0b; /* between the panels of the workspace */
+    --salus-icon-filter: brightness(0) invert(1);
+    --salus-icon-fg: #fff;
+  }
+
+  :root[data-theme="dark-oled"] {
+    color-scheme: dark;
+    --salus-bg: #000000;
+    --salus-surface: #120a1f;
+    --salus-surface-alt: #0c0617;
+    --salus-surface-2: #22133a;
+    --salus-surface-3: #38235f;
+    --salus-border: #472b78;
+    --salus-fg: #f0eafb;
+    --salus-fg-muted: #c6b4ea;
+    --salus-fg-faint: #8a70b4;
+    --salus-accent: #33e66a;
+    --salus-accent-fg: #000000;
+    --salus-danger: #ff4d6d;
+    --salus-warning: #ffb02e;
+    --salus-success: #33e66a;
+    --salus-overlay: rgba(0, 0, 0, 0.7);
+    --salus-shadow: 0 12px 32px rgba(0, 0, 0, 0.8);
+    --salus-gap: #000000; /* between the panels of the workspace */
+    --salus-icon-filter: brightness(0) invert(1);
+    --salus-icon-fg: #fff;
+  }
+
+  :root[data-theme="midnight"] {
+    color-scheme: dark;
+    --salus-bg: #0b1020;
+    --salus-surface: #111830;
+    --salus-surface-alt: #0f1529;
+    --salus-surface-2: #19213f;
+    --salus-surface-3: #26305a;
+    --salus-border: #1f2848;
+    --salus-fg: #e4e9ff;
+    --salus-fg-muted: #9aa6d6;
+    --salus-fg-faint: #566089;
+    --salus-accent: #35c3e8;
+    --salus-accent-fg: #04202a;
+    --salus-danger: #ff6b81;
+    --salus-warning: #f5b83d;
+    --salus-success: #4cd0a0;
+    --salus-overlay: rgba(3, 5, 14, 0.6);
+    --salus-shadow: 0 12px 32px rgba(0, 0, 0, 0.55);
+    --salus-gap: #070a15; /* between the panels of the workspace */
+    --salus-icon-filter: brightness(0) invert(1);
+    --salus-icon-fg: #fff;
   }
 
   :root {

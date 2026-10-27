@@ -1,7 +1,20 @@
 # Theming
 
-Salus has a light and a dark theme that the user can switch. Plugins follow it **without any code**: Salus adds a stylesheet to every plugin page
-and sets `data-theme="dark"` or `"light"` on the page's `<html>` element, and changes it when the user switches.
+Salus comes with several themes, and the user picks one in the settings (**Settings → Salus → Theme**). Plugins follow it **without any code**: Salus adds
+a stylesheet to every plugin page and sets the `data-theme` attribute of the page's `<html>` element to the theme's id, and changes it when the user picks another theme.
+The change applies at once, in every open page.
+
+| Theme id | Look |
+|---|---|
+| `dark` | Neutral dark with a blue accent. The default. |
+| `light` | Neutral light with a purple accent. |
+| `light-red` | Light with a red accent. |
+| `dark-green` | Dark with a green accent. |
+| `dark-oled` | Pure black (for OLED screens) with purple-tinted surfaces and borders and an intense bright green accent. |
+| `midnight` | Deep blue with a cyan accent. |
+
+Every theme defines the same variables below, so a plugin that only uses the variables looks right in all of them. If you need to treat light and dark
+themes differently, use `color-scheme` (`getComputedStyle(document.documentElement).colorScheme` is `light` or `dark`) rather than the theme ids, because themes can be added.
 
 ## Use the variables
 
@@ -21,6 +34,7 @@ The stylesheet defines CSS variables. Use them in your own CSS instead of fixed 
 |---|---|
 | `--salus-bg` | Page background |
 | `--salus-surface`, `--salus-surface-alt`, `--salus-surface-2`, `--salus-surface-3` | Cards, panels, hover and pressed states (increasing emphasis) |
+| `--salus-gap` | The workspace background between the panels (a bit darker than `--salus-bg`). Salus uses it itself; plugins rarely need it. |
 | `--salus-border` | Borders and separators |
 | `--salus-fg`, `--salus-fg-muted`, `--salus-fg-faint` | Text, secondary text, hints |
 | `--salus-accent`, `--salus-accent-fg` | Primary action color and text on it |
@@ -43,5 +57,4 @@ CSS) and map their colors to the `--salus-*` variables. Libraries with their own
 The stylesheet is at `/salus/theme.css` if you need to read it. You can ignore it entirely and style your plugin yourself; it is applied automatically but never forced.
 
 !!! note "Not final"
-    The stylesheet is added once the page has loaded, so a plugin may show the default colors very briefly. And the theme switch currently lives in the bottom
-    right corner of the workspace.
+    The stylesheet is added once the page has loaded, so a plugin may show the default colors very briefly.

@@ -29,6 +29,13 @@ thread_local! {
     static COMPONENT_TAB_OPENER: RefCell<Option<ComponentTabOpener>> = const { RefCell::new(None) };
     // Set by the workspace: lets the user choose between several viewers for a file.
     static VIEWER_PICKER: RefCell<Option<ViewerPicker>> = const { RefCell::new(None) };
+    // Set by the workspace: the server announced another theme.
+    static THEME_CHANGE_HANDLER: RefCell<Option<Rc<dyn Fn(String)>>> = const { RefCell::new(None) };
+    // The window of each loaded plugin iframe, kept so that a frontend that is being closed can still be recognized.
+    static FRAME_WINDOWS: RefCell<HashMap<u32, web_sys::Window>> = RefCell::new(HashMap::new());
+    // Frontends closed a moment ago: frontend id -> (plugin id, window, time of closing in ms). A closing frontend
+    // may send a last message (`onDestroyed`), which arrives after its iframe is gone from the page.
+    static CLOSING: RefCell<HashMap<u32, (u32, web_sys::Window, f64)>> = RefCell::new(HashMap::new());
     // The plugin frontends currently shown in this page: frontend id -> (plugin id, component name).
     static FRONTENDS: RefCell<HashMap<u32, (u32, String)>> = RefCell::new(HashMap::new());
     // Identifies this browser page towards the server (see `page_id`).
@@ -50,6 +57,10 @@ pub fn set_component_tab_opener(opener: impl Fn(SpawnedComponent) + 'static) {
     COMPONENT_TAB_OPENER.with(|slot| *slot.borrow_mut() = Some(Rc::new(opener)));
 }
 
+pub fn set_theme_change_handler(handler: impl Fn(String) + 'static) {
+    THEME_CHANGE_HANDLER.with(|slot| *slot.borrow_mut() = Some(Rc::new(handler)));
+}
+
 pub fn set_viewer_picker(picker: impl Fn(String, Vec<FileViewer>, oneshot::Sender<Option<FileViewer>>) + 'static) {
     VIEWER_PICKER.with(|slot| *slot.borrow_mut() = Some(Rc::new(picker)));
 }
@@ -59,8 +70,39 @@ pub fn register_frontend(frontend_process_id: u32, plugin_id: u32, component: St
     FRONTENDS.with(|map| map.borrow_mut().insert(frontend_process_id, (plugin_id, component)));
 }
 
+/// How long a closed frontend is still accepted as the sender of a message.
+const CLOSING_GRACE_MS: f64 = 3000.0;
+
 pub fn unregister_frontend(frontend_process_id: u32) {
-    FRONTENDS.with(|map| map.borrow_mut().remove(&frontend_process_id));
+    let removed = FRONTENDS.with(|map| map.borrow_mut().remove(&frontend_process_id));
+    let window = FRAME_WINDOWS.with(|map| map.borrow_mut().remove(&frontend_process_id));
+    let now = web_sys::js_sys::Date::now();
+    CLOSING.with(|closing| {
+        let mut closing = closing.borrow_mut();
+        closing.retain(|_, (_, _, closed_at)| now - *closed_at < CLOSING_GRACE_MS);
+        if let (Some((plugin_id, _)), Some(window)) = (removed, window) {
+            closing.insert(frontend_process_id, (plugin_id, window, now));
+        }
+    });
+}
+
+/// The plugin a frontend belongs to, also shortly after it was closed.
+fn plugin_of_frontend(frontend_process_id: u32) -> Option<u32> {
+    FRONTENDS
+        .with(|map| map.borrow().get(&frontend_process_id).map(|(plugin_id, _)| *plugin_id))
+        .or_else(|| CLOSING.with(|closing| closing.borrow().get(&frontend_process_id).map(|(plugin_id, _, _)| *plugin_id)))
+}
+
+/// Tells a plugin page that its tab is now shown or hidden (`"shown"` / `"hidden"`); the SDK turns it into
+/// `onShown` / `onHidden`.
+pub fn send_lifecycle(frontend_process_id: u32, state: &str) {
+    spawn(send_message_to_plugin(PluginMessageFrame {
+        frontend_process_id,
+        message_id: next_message_id(),
+        flags: 0,
+        logical_channel: api::message_frame::LIFECYCLE_CHANNEL.to_string(),
+        payload: state.as_bytes().to_vec(),
+    }));
 }
 
 // === Message definition
@@ -103,13 +145,16 @@ fn plugin_iframe(frontend_process_id: u32) -> Option<HtmlIFrameElement> {
 }
 
 fn event_comes_from_frontend(event: &MessageEvent, frontend_process_id: u32) -> bool {
-    let (Some(source), Some(iframe)) = (event.source(), plugin_iframe(frontend_process_id)) else {
+    let Some(source) = event.source() else {
         return false;
     };
-    let Some(content_window) = iframe.content_window() else {
-        return false;
-    };
-    JsValue::from(content_window) == JsValue::from(source)
+    if let Some(content_window) = plugin_iframe(frontend_process_id).and_then(|iframe| iframe.content_window()) {
+        return JsValue::from(content_window) == JsValue::from(source);
+    }
+    // The iframe is gone already: it may be a frontend that sent its last message while it was closed.
+    CLOSING.with(|closing| {
+        closing.borrow().get(&frontend_process_id).is_some_and(|(_, window, _)| JsValue::from(window.clone()) == JsValue::from(source))
+    })
 }
 
 async fn send_message_to_plugin(message_frame: PluginMessageFrame) {
@@ -137,13 +182,10 @@ fn route_between_components(frame: PluginMessageFrame) -> Option<PluginMessageFr
     };
     let name = name.to_string();
 
-    let same_plugin = FRONTENDS.with(|map| {
-        let map = map.borrow();
-        match (map.get(&sender), map.get(&target)) {
-            (Some((a, _)), Some((b, _))) => a == b && sender != target,
-            _ => false,
-        }
-    });
+    let same_plugin = match (plugin_of_frontend(sender), FRONTENDS.with(|map| map.borrow().get(&target).map(|(plugin_id, _)| *plugin_id))) {
+        (Some(a), Some(b)) => a == b && sender != target,
+        _ => false,
+    };
     if !same_plugin {
         return Some(frame);
     }
@@ -182,6 +224,14 @@ fn run_socket_to_backend(mut plugin_salus_stream: UnboundedReceiver<PluginMessag
     let recv_task = async move {
         while let Some(Ok(Message::Bytes(frame))) = read.next().await {
             let dec_frame = PluginMessageFrame::decode(&frame).unwrap();
+            if dec_frame.logical_channel == api::message_frame::THEME_CHANNEL {
+                // Not for a plugin: the server says the theme changed.
+                let handler = THEME_CHANGE_HANDLER.with(|slot| slot.borrow().clone());
+                if let (Some(handler), Ok(theme)) = (handler, String::from_utf8(dec_frame.payload)) {
+                    handler(theme);
+                }
+                continue;
+            }
             spawn(send_message_to_plugin(dec_frame));
         }
     };
@@ -338,6 +388,9 @@ fn apply_theme_to_frame(frontend_process_id: u32, theme: &str) {
 
 /// Injects the theme stylesheet into one plugin page and sets its theme (when it has loaded).
 pub fn apply_theme(frontend_process_id: u32, theme: &str) {
+    if let Some(window) = plugin_iframe(frontend_process_id).and_then(|iframe| iframe.content_window()) {
+        FRAME_WINDOWS.with(|map| map.borrow_mut().insert(frontend_process_id, window));
+    }
     apply_theme_to_frame(frontend_process_id, theme);
 }
 

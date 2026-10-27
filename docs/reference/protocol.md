@@ -119,6 +119,7 @@ by the backend, plus topic parameters. The framework answers **every** request o
 | `id` | Copied from the request. |
 | `ok` | `true` on success, `false` on failure. |
 | `error` | Human-readable reason when `ok` is `false`. |
+| `data` | Result of the topic, when it has one (`salus://config/…`). |
 | others | Topic-specific results. |
 
 Unknown topics are answered with `ok: false, error: "unknown topic"`. The Python SDK waits 5 seconds for a reply.
@@ -128,6 +129,8 @@ Replies may come in any order.
 |---|---|---|
 | `salus://http/open` | backend → framework | Open an HTTP route. |
 | `salus://http/close` | backend → framework | Close an HTTP route. |
+| `salus://config/get` | backend → framework | Read the plugin's settings. The reply carries `data: {"values": {…}}`, the values in effect. |
+| `salus://config/set` | backend → framework | Change settings: `values` is an object of changes (a value sets, `null` resets to the default). All or none; refused with `ok: false` if a key is unknown or a value does not fit the configurable. The reply carries `data` like `get`. |
 | `salus://frontend/attached` | framework → backend | Event: a frontend was bound. The frontend is in the envelope's `frontend_process_id`; meta is `{"component": "<component-name>"}`, the frontend component it runs. |
 | `salus://frontend/detached` | framework → backend | Event: a frontend was closed (its tab or its browser page went away). Same shape as `attached`: the frontend is in the envelope's `frontend_process_id`, meta is `{"component": "<component-name>"}`. |
 
@@ -229,6 +232,14 @@ Between a plugin iframe and the Salus page, a frame is a structured-clone object
 (`payload` is an array of byte values; `Uint8Array` is accepted when receiving.) The Salus page checks that the message
 comes from the iframe of that frontend, then forwards the frame, binary-encoded exactly as above, over a websocket to
 the server.
+
+### Tab events
+
+The Salus page tells a plugin page when its tab is shown or hidden with a frame on the channel `salus://lifecycle`, whose payload is
+the UTF-8 text `shown` or `hidden`. The page sends one as soon as the iframe has loaded (the state of its tab then) and another each time the user
+switches tabs. These frames exist only between the page and the iframe; the server never sees them. The JavaScript SDK turns them into
+`onShown` and `onHidden`. A closing page needs no frame: the SDK uses the browser's `pagehide` event for `onDestroyed`. The Salus page still accepts a last
+message from a frontend whose tab it closed during the 3 seconds before.
 
 ## Connection lifecycle
 

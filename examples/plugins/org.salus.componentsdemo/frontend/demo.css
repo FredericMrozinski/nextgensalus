@@ -1,4 +1,4 @@
-/* Uses only the Salus theme variables: the page follows the light/dark theme without any code. */
+/* Uses only the Salus theme variables: the page follows the chosen theme without any code. */
 body { padding: var(--salus-space-3); }
 h1 { font-size: 15px; }
 .row { display: flex; flex-wrap: wrap; gap: var(--salus-space-2); margin-bottom: var(--salus-space-3); }

@@ -4,7 +4,7 @@ This tutorial walks through a real plugin that ships in `examples/plugins/`:
 
 **Image Viewer** (`org.salus.imageviewer`) shows a whole slide image (a pathology scan with billions of pixels) using
 [OpenSeadragon](https://openseadragon.github.io/). Its backend opens the slide file and produces the image tiles
-on demand. It is a **file viewer**: it never appears in the **+** list. Another plugin (for example the Dataset Workbench)
+on demand. It is a **file viewer**: its dock icon is disabled. Another plugin (for example the Dataset Workbench)
 calls `salus.openFile(path)` and Salus opens the viewer for that file.
 
 It uses nearly everything in the SDK: [file viewers](file-viewers.md), [HTTP routes](http.md) for tiles and a
@@ -20,7 +20,7 @@ flowchart LR
 
 ## The manifests
 
-The viewer has no `entry-component`, so it is not in the **+** list. `file_viewer_for` lists the file types Salus opens with it.
+The viewer has no `entry-component`, so its dock icon is disabled. `file_viewer_for` lists the file types Salus opens with it.
 
 ```toml title="org.salus.imageviewer/manifest.toml"
 --8<-- "examples/plugins/org.salus.imageviewer/manifest.toml"

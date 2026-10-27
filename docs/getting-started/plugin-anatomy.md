@@ -60,7 +60,7 @@ Salus serves a component's page from `/plugins/<folder>/<entrypoint>` and adds q
 | `parent_fe_process_id` | Only present if another component or plugin opened this one (`salus.parent`). |
 | `params` | JSON the opener passed, or `{"file": ...}` for a [file viewer](../guides/file-viewers.md) (`salus.params`). |
 
-Use ES modules (`<script type="module">`) to load the JavaScript SDK. Salus also adds its [theme stylesheet](../guides/theming.md) to every page, so plain HTML already follows the light/dark theme. Third-party libraries are plain files in
+Use ES modules (`<script type="module">`) to load the JavaScript SDK. Salus also adds its [theme stylesheet](../guides/theming.md) to every page, so plain HTML already follows the theme the user chose. Third-party libraries are plain files in
 your folder: the image viewer example ships OpenSeadragon as `frontend/openseadragon.min.js`.
 
 ## The manifest

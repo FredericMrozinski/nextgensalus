@@ -414,6 +414,10 @@ pub fn get_plugin_id_for_fe_pid(fe_pid: u32) -> Option<u32> {
     frontend_processes().lock().unwrap().get(&fe_pid).map(|fe| fe.plugin_id)
 }
 
+pub fn get_plugin_id_for_be_pid(be_pid: u32) -> Option<u32> {
+    backend_processes().lock().unwrap().get(&be_pid).map(|be| be.plugin_id)
+}
+
 pub fn get_frontend_owner(fe_pid: u32) -> Option<User> {
     frontend_processes().lock().unwrap().get(&fe_pid).map(|fe| fe.owner.clone())
 }
@@ -468,6 +472,7 @@ mod tests {
     fn plugin(folder: &str, dependencies: &[&str], entry: Option<&str>, components: Vec<FrontendComponent>) -> Plugin {
         Plugin {
             plugin_folder_name: format!("/plugins/{folder}"),
+            configurable: None,
             manifest: PluginManifest {
                 meta_data: PluginMetaData { api_version: 3, entry_component: entry.map(str::to_string) },
                 backend_specs: PluginBackendSpecification {
@@ -481,6 +486,7 @@ mod tests {
                     description: String::new(),
                     version: String::new(),
                     contact: String::new(),
+                    icon: None,
                 },
                 dependencies: dependencies.iter().map(|d| d.to_string()).collect(),
             },

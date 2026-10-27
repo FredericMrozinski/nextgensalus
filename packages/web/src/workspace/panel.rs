@@ -25,7 +25,7 @@ pub fn Panel(panel_id: PanelId) -> Element {
                     div {
                         key: "{tab.id.raw()}",
                         class: if workspace.is_active(panel_id, tab.id) { "panel-tab" } else { "panel-tab panel-tab-hidden" },
-                        TabContentView { content: tab.content }
+                        TabContentView { content: tab.content, active: workspace.is_active(panel_id, tab.id) }
                     }
                 }
             }

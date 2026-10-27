@@ -1,4 +1,4 @@
-use crate::models::{FileViewer, Plugin, PluginDescription, SpawnedComponent};
+use crate::models::{FileViewer, Plugin, SpawnedComponent};
 use axum_extra::extract::CookieJar;
 #[cfg(feature = "server")]
 use dioxus::fullstack::FullstackContext;
@@ -31,17 +31,36 @@ pub async fn get_plugin_from_id(plugin_id: u32) -> Result<Option<Plugin>, Server
     Ok(plugin_library::get_plugin_from_id(&plugin_id))
 }
 
-/// The plugins the plugin picker lists: those that name an entry component.
+/// The theme the workspace shows: an id as defined in `theme.css`. Needs no session, so the login page can use it too.
 #[server]
-// TODO, at some point (as with everything) a session token needs to be passed here so that
-// only the user allowed plugins will be returned
-pub async fn get_available_plugins() -> Result<Vec<(u32, PluginDescription)>, ServerFnError> {
-    let mut res: Vec<(u32, PluginDescription)> = plugin_library::get_plugins().iter()
-        .filter(|(_, plugin)| plugin.entry_component().is_some())
-        .map(|(id, plugin)| (*id, plugin.manifest.description.clone()))
-        .collect();
-    res.sort_by_key(|(id, _)| *id);
+pub async fn get_theme() -> Result<String, ServerFnError> {
+    Ok(crate::config_loader::theme())
+}
 
+/// A plugin as the dock shows it.
+#[derive(PartialEq, Clone, serde::Serialize, serde::Deserialize, Debug)]
+pub struct DockPlugin {
+    pub plugin_id: u32,
+    pub name: String,
+    /// Path of the icon below the plugins directory (`<plugin folder>/<icon>`), if the plugin has one.
+    pub icon: Option<String>,
+}
+
+/// The plugins a user can open from the dock: those with an entry component. Plugins that only serve others
+/// (a file viewer, for example) are not listed.
+#[server]
+pub async fn get_dock_plugins() -> Result<Vec<DockPlugin>, ServerFnError> {
+    session_user().await?;
+    let mut res: Vec<DockPlugin> = plugin_library::get_plugins().iter()
+        .filter(|(_, plugin)| plugin.entry_component().is_some())
+        .map(|(id, plugin)| DockPlugin {
+            plugin_id: *id,
+            name: plugin.manifest.description.name.clone(),
+            icon: plugin.manifest.description.icon.as_ref()
+                .map(|icon| format!("{}/{}", plugin.identifier(), icon)),
+        })
+        .collect();
+    res.sort_by_key(|plugin| plugin.plugin_id);
     Ok(res)
 }
 

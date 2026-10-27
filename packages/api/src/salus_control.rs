@@ -34,14 +34,17 @@ pub async fn handle_backend_request(be_pid: u32, frame: PluginMessageFrame) {
         return;
     };
 
-    let result = match topic.as_str() {
-        "http/open" => http_gateway::open_route(be_pid, &meta),
-        "http/close" => http_gateway::close_route(be_pid, &meta),
+    let result: Result<Option<serde_json::Value>, String> = match topic.as_str() {
+        "http/open" => http_gateway::open_route(be_pid, &meta).map(|()| None),
+        "http/close" => http_gateway::close_route(be_pid, &meta).map(|()| None),
+        "config/get" => config_request(be_pid, None).await.map(Some),
+        "config/set" => config_request(be_pid, Some(&meta)).await.map(Some),
         _ => Err("unknown topic".to_string()),
     };
 
     let reply = match result {
-        Ok(()) => json!({ "id": id, "ok": true }),
+        Ok(None) => json!({ "id": id, "ok": true }),
+        Ok(Some(data)) => json!({ "id": id, "ok": true, "data": data }),
         Err(error) => json!({ "id": id, "ok": false, "error": error }),
     };
 
@@ -55,6 +58,28 @@ pub async fn handle_backend_request(be_pid: u32, frame: PluginMessageFrame) {
     {
         warn!("Backend [{be_pid}]: failed to send reply for '{}': {e}", frame.logical_channel);
     }
+}
+
+/// `config/get` and `config/set`: the backend's own settings. `set` takes the changes as `values` in the meta
+/// (a value sets the setting, `null` resets it). Both reply with the values in effect.
+async fn config_request(be_pid: u32, set: Option<&Meta>) -> Result<serde_json::Value, String> {
+    let plugin = plugin_process_manager::get_plugin_id_for_be_pid(be_pid)
+        .and_then(|plugin_id| crate::plugin_library::get_plugin_from_id(&plugin_id))
+        .ok_or("unknown plugin")?;
+    let updates = match set {
+        None => None,
+        Some(meta) => match meta.get("values") {
+            Some(serde_json::Value::Object(values)) => Some(values.clone()),
+            _ => return Err("'values' must be an object".to_string()),
+        },
+    };
+    let result = tokio::task::spawn_blocking(move || match updates {
+        None => crate::config_loader::plugin_values(&plugin),
+        Some(updates) => crate::config_loader::update_plugin_values(&plugin, &updates),
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    result.map(|values| json!({ "values": values })).map_err(|e| e.to_string())
 }
 
 pub async fn send_frontend_attached(be_pid: u32, fe_pid: u32) {

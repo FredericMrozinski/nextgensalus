@@ -1,89 +1,67 @@
-//! Configuration directories of the framework and of every plugin.
+//! The config files of Salus and of every plugin.
 //!
 //! Everything lives under the platform's config directory (`directories::ProjectDirs`):
 //!
 //! ```text
-//! <config root>/salus.toml            framework configuration
-//! <config root>/plugins/<plugin>/     one directory per plugin (its folder name in the plugins directory)
+//! <config root>/salus.toml              the settings of Salus
+//! <config root>/plugins/<plugin>.toml   the settings of one plugin (<plugin> is its folder name in the plugins directory)
 //! ```
 //!
 //! The config root is the config directory, or its `config` subfolder where the config and data
 //! directories coincide (macOS), so it never mixes with the installed plugins in `<data dir>/plugins`.
 //!
-//! A plugin's backend reads and writes its directory directly (its path is passed in `SALUS_CONFIG_DIR`);
-//! its frontend goes through `plugin_config_api`. Both end up in the functions of this module, which refuse
-//! every path that would leave the plugin's directory.
+//! Each plugin has exactly one config file. *What* may be in it is defined by the plugin's configurable
+//! (see `configurable`), which is never written to: the values are checked against it on every change, and
+//! settings that are not in the file read as their default. Salus owns the file; a plugin's backend and
+//! frontend read and change their values through the framework (`salus://config/…` and `/plugin-config/…`).
 
+use crate::configurable::Configurable;
+use crate::models::Plugin;
 use directories::ProjectDirs;
 use log::{info, warn};
-use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
 
 const FRAMEWORK_CONFIG_FILE: &str = "salus.toml";
-const DEFAULT_MAX_FILE_BYTES: u64 = 8 * 1024 * 1024;
+const SALUS_CONFIGURABLE: &str = include_str!("salus.configurable.toml");
 
-const DEFAULT_FRAMEWORK_CONFIG: &str = "\
-# Salus framework configuration. Every setting is optional; the values below are the defaults.
-
-# Largest file a plugin may write into its config directory through the frontend SDK, in bytes.
-# plugin_config_max_file_bytes = 8388608
-
-# Directory the plugins are installed in. A relative path is taken relative to this file's directory.
-# Defaults to the \"plugins\" folder of the platform's data directory.
-# plugins_dir = \"/path/to/plugins\"
-";
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(default, deny_unknown_fields)]
+/// The settings of Salus itself, as the typed values the rest of the server uses.
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct FrameworkConfig {
-    pub plugin_config_max_file_bytes: u64,
     pub plugins_dir: Option<PathBuf>,
 }
 
-impl Default for FrameworkConfig {
-    fn default() -> Self {
-        Self { plugin_config_max_file_bytes: DEFAULT_MAX_FILE_BYTES, plugins_dir: None }
+/// What can be configured in Salus (`salus.configurable.toml`, embedded in the server).
+pub fn salus_configurable() -> &'static Configurable {
+    static CONFIGURABLE: OnceLock<Configurable> = OnceLock::new();
+    CONFIGURABLE.get_or_init(|| Configurable::parse(SALUS_CONFIGURABLE).expect("salus.configurable.toml is valid"))
+}
+
+fn framework_config_from(values: &Map<String, Value>) -> FrameworkConfig {
+    FrameworkConfig {
+        plugins_dir: values.get("plugins_dir").and_then(Value::as_str).filter(|dir| !dir.is_empty()).map(PathBuf::from),
     }
 }
 
-/// The framework configuration, read once. A missing file means defaults; an unreadable one is reported
-/// and also means defaults, so a typo cannot keep the server from starting.
+/// The framework configuration, read once (changes to `salus.toml` apply after a restart). A missing or
+/// unreadable file means defaults, so a typo cannot keep the server from starting.
 pub fn framework_config() -> &'static FrameworkConfig {
     static CONFIG: OnceLock<FrameworkConfig> = OnceLock::new();
-    CONFIG.get_or_init(|| {
-        let path = framework_config_path();
-        match fs::read_to_string(&path) {
-            Ok(text) => toml::from_str(&text).unwrap_or_else(|e| {
-                warn!("Ignoring {}: {e}", path.display());
-                FrameworkConfig::default()
-            }),
-            Err(e) if e.kind() == io::ErrorKind::NotFound => FrameworkConfig::default(),
-            Err(e) => {
-                warn!("Cannot read {}: {e}", path.display());
-                FrameworkConfig::default()
-            }
-        }
-    })
+    CONFIG.get_or_init(|| framework_config_from(&load_effective(&framework_config_path(), salus_configurable())))
 }
 
-/// Creates the config directory and a commented `salus.toml` on first start, then loads the configuration.
+/// Creates the config directories on first start, then loads the framework configuration.
 pub fn init() {
     let root = config_root();
     if let Err(e) = fs::create_dir_all(root.join("plugins")) {
         warn!("Cannot create config directory {}: {e}", root.display());
         return;
     }
-    let path = framework_config_path();
-    if !path.exists() {
-        if let Err(e) = fs::write(&path, DEFAULT_FRAMEWORK_CONFIG) {
-            warn!("Cannot write {}: {e}", path.display());
-        }
-    }
-    info!("Framework configuration: {}", path.display());
+    info!("Framework configuration: {}", framework_config_path().display());
     framework_config();
 }
 
@@ -96,6 +74,16 @@ pub fn config_root() -> PathBuf {
 /// `<data dir>/plugins`, so the configuration goes into a `config` folder of its own there.
 fn config_root_for(config_dir: &Path, data_dir: &Path) -> PathBuf {
     if config_dir == data_dir { config_dir.join("config") } else { config_dir.to_path_buf() }
+}
+
+/// The id of the theme Salus shows (`theme` in `salus.toml`): the `data-theme` of `theme.css`. Read on every call,
+/// so a change in the settings applies without a restart.
+pub fn theme() -> String {
+    load_effective(&framework_config_path(), salus_configurable())
+        .get("theme")
+        .and_then(Value::as_str)
+        .unwrap_or("dark")
+        .to_string()
 }
 
 /// Where plugins are installed: `plugins_dir` from `salus.toml`, else the `plugins` folder of the data directory.
@@ -113,144 +101,115 @@ pub fn framework_config_path() -> PathBuf {
     config_root().join(FRAMEWORK_CONFIG_FILE)
 }
 
-/// The config directory of a plugin, created if needed. `identifier` is the plugin's folder name.
-pub fn plugin_config_dir(identifier: &str) -> io::Result<PathBuf> {
-    check_component(identifier).map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e.to_string()))?;
-    let dir = config_root().join("plugins").join(identifier);
-    fs::create_dir_all(&dir)?;
-    Ok(dir)
+/// The config file of a plugin. `identifier` is the plugin's folder name.
+pub fn plugin_config_path(identifier: &str) -> io::Result<PathBuf> {
+    let valid = !identifier.is_empty()
+        && identifier != "."
+        && identifier != ".."
+        && !identifier.contains(['/', '\\', '\0', ':']);
+    if !valid {
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, format!("invalid plugin identifier {identifier:?}")));
+    }
+    Ok(config_root().join("plugins").join(format!("{identifier}.toml")))
 }
 
 // ============================================================================
-// Files inside a plugin's directory
+// Reading and changing a config file
 // ============================================================================
 
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
-    #[error("invalid path: {0}")]
-    InvalidPath(&'static str),
-    #[error("not found")]
-    NotFound,
-    #[error("file is larger than the allowed {0} bytes")]
-    TooLarge(u64),
+    /// The change was refused: unknown setting, or a value of the wrong type or outside its limits.
+    #[error("{0}")]
+    Invalid(String),
+    #[error("the config file cannot be read: {0}")]
+    Corrupt(String),
     #[error(transparent)]
-    Io(io::Error),
+    Io(#[from] io::Error),
 }
 
-impl From<io::Error> for ConfigError {
-    fn from(e: io::Error) -> Self {
-        if e.kind() == io::ErrorKind::NotFound { ConfigError::NotFound } else { ConfigError::Io(e) }
+/// The values stored in a config file; a file that does not exist yet holds none.
+pub fn read_stored(path: &Path) -> Result<Map<String, Value>, ConfigError> {
+    let text = match fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(Map::new()),
+        Err(e) => return Err(e.into()),
+    };
+    let table: toml::Table = text.parse().map_err(|e: toml::de::Error| ConfigError::Corrupt(e.to_string()))?;
+    match serde_json::to_value(table) {
+        Ok(Value::Object(map)) => Ok(map),
+        _ => Err(ConfigError::Corrupt("not a table".into())),
     }
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq)]
-pub struct ConfigEntry {
-    pub name: String,
-    pub is_dir: bool,
-    pub size: u64,
-}
-
-fn check_component(part: &str) -> Result<(), ConfigError> {
-    if part.is_empty() || part == "." || part == ".." {
-        return Err(ConfigError::InvalidPath("empty, '.' or '..' path segment"));
-    }
-    if part.contains(['\\', '\0', ':']) {
-        return Err(ConfigError::InvalidPath("path segments must not contain '\\', ':' or NUL"));
-    }
-    Ok(())
-}
-
-/// Maps `/`-separated `relative` (no leading slash; `""` is the directory itself) to a path below `dir`.
-fn resolve(dir: &Path, relative: &str) -> Result<PathBuf, ConfigError> {
-    let mut path = dir.to_path_buf();
-    if !relative.is_empty() {
-        for part in relative.split('/') {
-            check_component(part)?;
-            path.push(part);
+/// The values in effect (stored values and defaults). A file that cannot be read counts as empty.
+pub fn load_effective(path: &Path, configurable: &Configurable) -> Map<String, Value> {
+    match read_stored(path) {
+        Ok(stored) => configurable.effective(&stored),
+        Err(e) => {
+            warn!("Ignoring {}: {e}", path.display());
+            configurable.effective(&Map::new())
         }
     }
-    // A symlink inside the directory must not lead out of it: check where the deepest existing part really is.
-    let mut existing = path.as_path();
-    while !existing.exists() {
-        match existing.parent() {
-            Some(parent) => existing = parent,
-            None => break,
-        }
-    }
-    let root = dir.canonicalize()?;
-    if !existing.canonicalize()?.starts_with(&root) {
-        return Err(ConfigError::InvalidPath("path leaves the config directory"));
-    }
-    Ok(path)
 }
 
-pub fn read(dir: &Path, relative: &str) -> Result<Vec<u8>, ConfigError> {
-    let path = resolve(dir, relative)?;
-    if path.is_dir() {
-        return Err(ConfigError::InvalidPath("is a directory"));
+/// Applies `updates` (a value sets, `null` resets to the default) and returns the values then in effect.
+/// A config file that is unreadable is not overwritten.
+pub fn update(path: &Path, configurable: &Configurable, updates: &Map<String, Value>) -> Result<Map<String, Value>, ConfigError> {
+    static WRITE_LOCK: Mutex<()> = Mutex::new(());
+    let _guard = WRITE_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let stored = read_stored(path)?;
+    let changed = configurable.apply(&stored, updates).map_err(ConfigError::Invalid)?;
+    if changed != stored {
+        write_stored(path, &changed)?;
     }
-    Ok(fs::read(path)?)
+    Ok(configurable.effective(&changed))
 }
 
-/// Writes atomically: readers see the old or the new content, never a half-written file.
-pub fn write(dir: &Path, relative: &str, data: &[u8], max_bytes: u64) -> Result<(), ConfigError> {
+/// The settings of a plugin: its config file and what may be in it. A plugin without a configurable has no settings.
+fn plugin_settings(plugin: &Plugin) -> Result<(PathBuf, Configurable), ConfigError> {
+    Ok((plugin_config_path(&plugin.identifier())?, plugin.configurable.clone().unwrap_or_default()))
+}
+
+/// The values in effect for a plugin.
+pub fn plugin_values(plugin: &Plugin) -> Result<Map<String, Value>, ConfigError> {
+    let (path, configurable) = plugin_settings(plugin)?;
+    Ok(load_effective(&path, &configurable))
+}
+
+pub fn update_plugin_values(plugin: &Plugin, updates: &Map<String, Value>) -> Result<Map<String, Value>, ConfigError> {
+    let (path, configurable) = plugin_settings(plugin)?;
+    update(&path, &configurable, updates)
+}
+
+/// Names of the settings that are set explicitly in a config file (the others are at their default).
+pub fn stored_keys(path: &Path) -> Vec<String> {
+    read_stored(path).map(|stored| stored.keys().cloned().collect()).unwrap_or_default()
+}
+
+pub fn plugin_stored_keys(plugin: &Plugin) -> Vec<String> {
+    plugin_config_path(&plugin.identifier()).map(|path| stored_keys(&path)).unwrap_or_default()
+}
+
+/// Writes atomically: readers see the old or the new file, never a half-written one.
+fn write_stored(path: &Path, values: &Map<String, Value>) -> Result<(), ConfigError> {
     static COUNTER: AtomicU64 = AtomicU64::new(0);
-    if relative.is_empty() {
-        return Err(ConfigError::InvalidPath("a file name is required"));
-    }
-    if data.len() as u64 > max_bytes {
-        return Err(ConfigError::TooLarge(max_bytes));
-    }
-    let path = resolve(dir, relative)?;
-    if path.is_dir() {
-        return Err(ConfigError::InvalidPath("is a directory"));
-    }
-    let parent = path.parent().ok_or(ConfigError::InvalidPath("a file name is required"))?;
+    let text = toml::to_string_pretty(values).map_err(|e| ConfigError::Invalid(e.to_string()))?;
+    let parent = path.parent().ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "no parent directory"))?;
     fs::create_dir_all(parent)?;
     let name = path.file_name().unwrap().to_string_lossy();
     let temp = parent.join(format!(".{name}.{}.{}.tmp", std::process::id(), COUNTER.fetch_add(1, Ordering::Relaxed)));
-    let result = fs::write(&temp, data).and_then(|_| fs::rename(&temp, &path));
+    let result = fs::write(&temp, text).and_then(|_| fs::rename(&temp, path));
     if result.is_err() {
         let _ = fs::remove_file(&temp);
     }
     Ok(result?)
 }
 
-/// Deletes a file, or a directory with everything in it.
-pub fn delete(dir: &Path, relative: &str) -> Result<(), ConfigError> {
-    if relative.is_empty() {
-        return Err(ConfigError::InvalidPath("cannot delete the config directory itself"));
-    }
-    let path = resolve(dir, relative)?;
-    if path.is_dir() { Ok(fs::remove_dir_all(path)?) } else { Ok(fs::remove_file(path)?) }
-}
-
-/// The entries of a directory, sorted by name. A directory that does not exist yet is empty.
-pub fn list(dir: &Path, relative: &str) -> Result<Vec<ConfigEntry>, ConfigError> {
-    let path = resolve(dir, relative)?;
-    if !path.exists() {
-        return Ok(Vec::new());
-    }
-    if !path.is_dir() {
-        return Err(ConfigError::InvalidPath("not a directory"));
-    }
-    let mut entries = Vec::new();
-    for entry in fs::read_dir(path)? {
-        let entry = entry?;
-        let name = entry.file_name().to_string_lossy().into_owned();
-        if name.ends_with(".tmp") && name.starts_with('.') {
-            continue; // a write in progress
-        }
-        let meta = entry.metadata()?;
-        entries.push(ConfigEntry { name, is_dir: meta.is_dir(), size: if meta.is_dir() { 0 } else { meta.len() } });
-    }
-    entries.sort_by(|a, b| a.name.cmp(&b.name));
-    Ok(entries)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     fn temp_dir(name: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("salus-config-test-{}-{name}", std::process::id()));
@@ -259,54 +218,57 @@ mod tests {
         dir
     }
 
-    #[test]
-    fn write_read_list_delete() {
-        let dir = temp_dir("roundtrip");
-        write(&dir, "a.json", b"{}", 100).unwrap();
-        write(&dir, "sub/deep/b.txt", b"hello", 100).unwrap();
-        assert_eq!(read(&dir, "sub/deep/b.txt").unwrap(), b"hello");
-        write(&dir, "a.json", b"[1]", 100).unwrap();
-        assert_eq!(read(&dir, "a.json").unwrap(), b"[1]");
+    fn sample() -> Configurable {
+        Configurable::parse(
+            "[[setting]]\nkey = \"zoom\"\nname = \"Zoom\"\ntype = \"float\"\ndefault = 1.5\n\
+             [[setting]]\nkey = \"count\"\nname = \"Count\"\ntype = \"int\"\n\
+             [[setting]]\nkey = \"on\"\nname = \"On\"\ntype = \"bool\"\ndefault = true\n",
+        )
+        .unwrap()
+    }
 
-        let names: Vec<_> = list(&dir, "").unwrap().into_iter().map(|e| (e.name, e.is_dir)).collect();
-        assert_eq!(names, [("a.json".to_string(), false), ("sub".to_string(), true)]);
-        assert_eq!(list(&dir, "missing").unwrap(), []);
-
-        delete(&dir, "sub").unwrap();
-        assert!(matches!(read(&dir, "sub/deep/b.txt"), Err(ConfigError::NotFound)));
-        assert!(matches!(delete(&dir, "a.json"), Ok(())));
-        assert!(matches!(delete(&dir, "a.json"), Err(ConfigError::NotFound)));
-        assert!(list(&dir, "").unwrap().is_empty(), "no temp files are left behind");
+    fn updates(value: Value) -> Map<String, Value> {
+        value.as_object().unwrap().clone()
     }
 
     #[test]
-    fn rejects_paths_leaving_the_directory() {
-        let dir = temp_dir("escape");
-        for bad in ["../x", "a/../../x", "/etc/passwd", "a//b", "a/./b", ".", "..", "a\\b", "c:x", "a\0b"] {
-            assert!(matches!(read(&dir, bad), Err(ConfigError::InvalidPath(_))), "{bad:?}");
-            assert!(matches!(write(&dir, bad, b"x", 10), Err(ConfigError::InvalidPath(_))), "{bad:?}");
+    fn update_stores_validates_and_resets() {
+        let path = temp_dir("update").join("plugins").join("p.toml");
+        let c = sample();
+        assert_eq!(Value::Object(load_effective(&path, &c)), json!({"zoom": 1.5, "on": true}));
+
+        let values = update(&path, &c, &updates(json!({"count": 3, "zoom": 2.0}))).unwrap();
+        assert_eq!(Value::Object(values), json!({"count": 3, "zoom": 2.0, "on": true}));
+        assert_eq!(Value::Object(load_effective(&path, &c)), json!({"count": 3, "zoom": 2.0, "on": true}));
+        assert!(fs::read_to_string(&path).unwrap().contains("zoom = 2.0"));
+
+        assert!(matches!(update(&path, &c, &updates(json!({"count": "x"}))), Err(ConfigError::Invalid(_))));
+        assert!(matches!(update(&path, &c, &updates(json!({"other": 1}))), Err(ConfigError::Invalid(_))));
+        assert_eq!(read_stored(&path).unwrap().len(), 2, "a refused update changes nothing");
+
+        let values = update(&path, &c, &updates(json!({"zoom": null}))).unwrap();
+        assert_eq!(values["zoom"], 1.5);
+        assert!(!read_stored(&path).unwrap().contains_key("zoom"));
+        let leftovers: Vec<_> = fs::read_dir(path.parent().unwrap()).unwrap().map(|e| e.unwrap().file_name()).collect();
+        assert_eq!(leftovers.len(), 1, "no temp files are left behind");
+    }
+
+    #[test]
+    fn an_unreadable_file_is_not_overwritten() {
+        let path = temp_dir("corrupt").join("p.toml");
+        fs::write(&path, "this is = = not toml").unwrap();
+        let c = sample();
+        assert_eq!(Value::Object(load_effective(&path, &c)), json!({"zoom": 1.5, "on": true}));
+        assert!(matches!(update(&path, &c, &updates(json!({"count": 1}))), Err(ConfigError::Corrupt(_))));
+        assert_eq!(fs::read_to_string(&path).unwrap(), "this is = = not toml");
+    }
+
+    #[test]
+    fn plugin_config_paths_cannot_leave_the_plugins_folder() {
+        assert!(plugin_config_path("org.example.a").unwrap().ends_with("plugins/org.example.a.toml"));
+        for bad in ["", ".", "..", "a/b", "a\\b", "c:x", "a\0b"] {
+            assert!(plugin_config_path(bad).is_err(), "{bad:?}");
         }
-        assert!(matches!(write(&dir, "", b"x", 10), Err(ConfigError::InvalidPath(_))));
-        assert!(matches!(delete(&dir, ""), Err(ConfigError::InvalidPath(_))));
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn symlinks_cannot_lead_out() {
-        let dir = temp_dir("symlink");
-        let outside = temp_dir("symlink-outside");
-        fs::write(outside.join("secret"), "s").unwrap();
-        std::os::unix::fs::symlink(&outside, dir.join("link")).unwrap();
-        assert!(matches!(read(&dir, "link/secret"), Err(ConfigError::InvalidPath(_))));
-        assert!(matches!(write(&dir, "link/new", b"x", 10), Err(ConfigError::InvalidPath(_))));
-        assert!(!outside.join("new").exists());
-    }
-
-    #[test]
-    fn enforces_the_size_limit() {
-        let dir = temp_dir("limit");
-        assert!(matches!(write(&dir, "big", &[0; 11], 10), Err(ConfigError::TooLarge(10))));
-        assert!(write(&dir, "ok", &[0; 10], 10).is_ok());
     }
 
     #[test]
@@ -317,14 +279,24 @@ mod tests {
     }
 
     #[test]
-    fn framework_config_parses() {
-        let c: FrameworkConfig = toml::from_str("plugin_config_max_file_bytes = 5").unwrap();
-        assert_eq!(c.plugin_config_max_file_bytes, 5);
-        assert_eq!(toml::from_str::<FrameworkConfig>("").unwrap(), FrameworkConfig::default());
-        assert!(toml::from_str::<FrameworkConfig>("typo = 1").is_err());
-        let c: FrameworkConfig = toml::from_str("plugins_dir = \"/opt/plugins\"").unwrap();
-        assert_eq!(c.plugins_dir, Some(PathBuf::from("/opt/plugins")));
+    fn every_theme_of_the_settings_is_defined_in_the_stylesheet() {
+        let css = include_str!("../../web/assets/theme.css");
+        let mut defined: Vec<&str> = css.split("data-theme=\"").skip(1).filter_map(|rest| rest.split('"').next()).collect();
+        defined.sort();
+        defined.dedup();
+        let mut offered = salus_configurable().setting("theme").unwrap().choices.iter().map(String::as_str).collect::<Vec<_>>();
+        offered.sort();
+        assert_eq!(defined, offered, "theme.css and the choices of `theme` in salus.configurable.toml must list the same themes");
+        assert_eq!(salus_configurable().setting("theme").unwrap().default, Some(serde_json::json!("dark")));
+    }
+
+    #[test]
+    fn the_salus_configurable_is_valid_and_feeds_the_framework_config() {
+        let c = salus_configurable();
+        assert!(c.setting("plugins_dir").is_some());
+        assert_eq!(framework_config_from(&c.effective(&Map::new())), FrameworkConfig::default());
+        let values = c.effective(&updates(json!({"plugins_dir": "/opt/plugins"})));
+        assert_eq!(framework_config_from(&values).plugins_dir, Some(PathBuf::from("/opt/plugins")));
         assert_eq!(Path::new("/root/config").join("/opt/plugins"), Path::new("/opt/plugins"));
-        assert!(toml::from_str::<FrameworkConfig>(DEFAULT_FRAMEWORK_CONFIG).is_ok());
     }
 }

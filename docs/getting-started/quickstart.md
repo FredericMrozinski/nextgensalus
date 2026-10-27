@@ -37,7 +37,7 @@ version = "0.1.0"
 
 [meta]
 api-version = 3
-entry-component = "main"              # the component the "+" list opens
+entry-component = "main"              # the component the dock icon opens
 
 [backend]
 entrypoint = "backend/plugin.py"
@@ -125,7 +125,7 @@ Copy the folder into the Salus plugins directory and **restart the server** (man
 | macOS | `~/Library/Application Support/org.fredericmrozinski.salus/plugins/` |
 | Linux | `~/.local/share/salus/plugins/` |
 
-Open Salus in the browser, press **+** on a panel, and pick **Echo** (the list shows plugins that name an `entry-component`). You should see
+Open Salus in the browser, click **Echo** in the dock on the left edge (a plugin is opened from the dock when it names an `entry-component`). You should see
 `Hello, Salus!` appear immediately, and every line you send comes back as `Echo: ...`.
 
 ## What just happened

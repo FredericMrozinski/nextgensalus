@@ -1,5 +1,5 @@
+mod dock;
 mod panel;
-mod plugin_picker;
 mod resize_handle;
 mod state;
 mod tab_bar;
@@ -13,11 +13,11 @@ use dioxus::prelude::*;
 use futures::StreamExt;
 use std::cell::RefCell;
 use std::rc::Rc;
+use dock::Dock;
 use panel::Panel;
-use plugin_picker::PluginPicker;
 use viewer_picker::ViewerPicker;
 use resize_handle::{ResizeAxis, ResizeHandle};
-use state::{PanelId, TabContent, Theme, ViewerPickerRequest};
+use state::{PanelId, TabContent, ViewerPickerRequest};
 
 pub const THEME_CSS: Asset = asset!("/assets/theme.css");
 
@@ -27,7 +27,6 @@ pub const THEME_CSS: Asset = asset!("/assets/theme.css");
 #[component]
 pub fn Workspace() -> Element {
     let workspace = use_context_provider(WorkspaceState::new);
-    use_hook(|| workspace.seed_demo_tabs());
     // Components Salus opens (requested by plugins) arrive here. They come over a channel so the tab is
     // opened from a task owned by this component. A component that already runs is only focused.
     let component_requests = use_hook(|| {
@@ -72,16 +71,40 @@ pub fn Workspace() -> Element {
         }
     });
 
-    // Theme: restore the user's choice, then keep the page and all plugin pages in sync with it.
+    // Theme: the server knows it (a setting of Salus). Start with the one shown last time, ask the server, and follow
+    // changes the server announces. The page and all plugin pages are kept in sync with it.
+    let theme_changes = use_hook(|| {
+        let (tx, rx) = futures::channel::mpsc::unbounded();
+        crate::frontend_communication_relay::set_theme_change_handler(move |theme| {
+            let _ = tx.unbounded_send(theme);
+        });
+        Rc::new(RefCell::new(Some(rx)))
+    });
     use_effect(move || {
         if let Some(stored) = theme::load_stored_theme() {
             workspace.set_theme(stored);
         }
     });
+    use_future(move || async move {
+        if let Ok(theme) = api::framework_web_api::get_theme().await {
+            workspace.set_theme(theme);
+        }
+    });
+    use_future(move || {
+        let theme_changes = theme_changes.clone();
+        async move {
+            let Some(mut changes) = theme_changes.borrow_mut().take() else {
+                return;
+            };
+            while let Some(theme) = changes.next().await {
+                workspace.set_theme(theme);
+            }
+        }
+    });
     use_effect(move || {
         let current = workspace.theme();
-        theme::apply_page_theme(current);
-        crate::frontend_communication_relay::apply_theme_to_all_frames(current.as_str());
+        theme::apply_page_theme(&current);
+        crate::frontend_communication_relay::apply_theme_to_all_frames(&current);
     });
 
     let left_width = workspace.left_width();
@@ -92,6 +115,8 @@ pub fn Workspace() -> Element {
     rsx! {
         document::Stylesheet { href: THEME_CSS }
         document::Stylesheet { href: asset!("/assets/workspace.css") }
+        div { class: "workspace-shell",
+        Dock {}
         div { class: "workspace-root",
             div { class: "workspace-main-row",
                 div {
@@ -117,14 +142,6 @@ pub fn Workspace() -> Element {
                 Panel { panel_id: PanelId::Bottom }
             }
         }
-        button {
-            class: "theme-toggle",
-            title: "Switch between light and dark theme",
-            onclick: move |_| workspace.set_theme(workspace.theme().toggled()),
-            if workspace.theme() == Theme::Dark { "☀" } else { "☾" }
-        }
-        if workspace.plugin_picker_target().is_some() {
-            PluginPicker {}
         }
         ViewerPicker {}
     }

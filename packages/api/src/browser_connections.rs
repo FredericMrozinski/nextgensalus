@@ -5,7 +5,7 @@
 //! the iframe by id. Also routes `peer://` messages between frontends that are related as
 //! parent and dependency.
 
-use crate::message_frame::{parse_peer_channel, PluginMessageFrame, PEER_PREFIX};
+use crate::message_frame::{parse_peer_channel, PluginMessageFrame, PEER_PREFIX, THEME_CHANNEL};
 use crate::plugin_message_router;
 use crate::plugin_process_manager;
 use crate::session_manager;
@@ -51,6 +51,21 @@ fn deliver_bytes(user_id: u32, bytes: Vec<u8>) -> bool {
         delivered |= connection.tx.send(bytes.clone()).is_ok();
     }
     delivered
+}
+
+/// Tells all open browser pages (of every user) to switch to `theme`.
+pub fn broadcast_theme(theme: &str) {
+    let frame = PluginMessageFrame {
+        frontend_process_id: crate::message_frame::NO_FRONTEND,
+        message_id: 0,
+        flags: 0,
+        logical_channel: THEME_CHANNEL.to_string(),
+        payload: theme.as_bytes().to_vec(),
+    };
+    let Ok(bytes) = frame.encode() else { return };
+    for connection in connections().lock().unwrap().values() {
+        let _ = connection.tx.send(bytes.clone());
+    }
 }
 
 /// Delivers a frame (addressed by its `frontend_process_id`) to the browser pages of the

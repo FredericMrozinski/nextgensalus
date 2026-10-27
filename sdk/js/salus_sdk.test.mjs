@@ -9,17 +9,19 @@ const FE = 30001;
 function fakeEnvironment(search = `?fe_process_id=${FE}`) {
   const posted = [];
   const listeners = new Set();
+  const pagehideListeners = new Set();
   const parent = { postMessage: (data, origin) => posted.push({ data, origin }) };
   const window = {
     parent,
     location: { origin: ORIGIN, search },
-    addEventListener: (type, fn) => type === "message" && listeners.add(fn),
-    removeEventListener: (type, fn) => type === "message" && listeners.delete(fn),
+    addEventListener: (type, fn) => (type === "message" ? listeners : type === "pagehide" ? pagehideListeners : new Set()).add(fn),
+    removeEventListener: (type, fn) => (type === "message" ? listeners : type === "pagehide" ? pagehideListeners : new Set()).delete(fn),
   };
   // What the Salus frontend does for backend -> plugin messages.
   const deliver = (frame, overrides = {}) =>
     listeners.forEach((fn) => fn({ source: parent, origin: ORIGIN, data: frame, ...overrides }));
-  return { window, posted, deliver, listenerCount: () => listeners.size };
+  const pagehide = () => pagehideListeners.forEach((fn) => fn({}));
+  return { window, posted, deliver, pagehide, listenerCount: () => listeners.size };
 }
 
 const frame = (channel, payload, extra = {}) => ({
@@ -409,56 +411,124 @@ test("plain http calls do not throw on error statuses", async () => {
   assert.equal(response.status, 502);
 });
 
-// --- Config directory ---------------------------------------------------------
+// --- Config ---------------------------------------------------------------------
 
-test("config reads, writes, lists and deletes through the framework", async () => {
-  const files = new Map();
+test("config reads, sets and resets settings through the framework", async () => {
+  const stored = { zoom: 1.5 };
   const { salus, calls } = httpEnvironment((url, init) => {
-    const path = decodeURIComponent(url.slice(`/plugin-config/${FE}`.length));
+    assert.equal(url, `/plugin-config/${FE}`);
     if (init.method === "PUT") {
-      files.set(path, init.body);
-      return new Response(null, { status: 204 });
+      const updates = JSON.parse(init.body);
+      if ("bad" in updates) return new Response("unknown setting 'bad'", { status: 400 });
+      for (const [key, value] of Object.entries(updates)) value === null ? delete stored[key] : (stored[key] = value);
     }
-    if (init.method === "DELETE") return files.delete(path) ? new Response(null, { status: 204 }) : new Response("", { status: 404 });
-    if (url.includes("?list")) return Response.json([{ name: "a.json", is_dir: false, size: 2 }, { name: "sub", is_dir: true, size: 0 }]);
-    return files.has(path) ? new Response(files.get(path)) : new Response("", { status: 404 });
+    return Response.json(stored);
   });
   const { config } = salus;
 
-  await config.writeJson("a b/c.json", { n: 1 });
-  assert.equal(calls[0].url, `/plugin-config/${FE}/a%20b/c.json`);
-  assert.equal(calls[0].init.method, "PUT");
-  assert.deepEqual(await config.readJson("a b/c.json"), { n: 1 });
+  assert.deepEqual(await config.all(), { zoom: 1.5 });
+  assert.equal(await config.get("zoom"), 1.5);
+  assert.equal(await config.get("missing"), undefined);
+  assert.equal(await config.get("missing", 7), 7);
 
-  await config.writeText("t.txt", "héllo");
-  assert.equal(await config.readText("t.txt"), "héllo");
-  await config.writeBytes("b.bin", new Uint8Array([1, 2]));
-  assert.deepEqual(await config.readBytes("b.bin"), new Uint8Array([1, 2]));
-
-  assert.equal(await config.readText("missing"), null);
-  assert.deepEqual(await config.readJson("missing", { d: 1 }), { d: 1 });
-
-  assert.deepEqual(await config.list(), ["a.json", "sub/"]);
-  assert.equal(calls.at(-1).url, `/plugin-config/${FE}?list`);
-  await config.list("sub");
-  assert.equal(calls.at(-1).url, `/plugin-config/${FE}/sub/?list`);
-  assert.equal(await config.exists("sub"), true);
-  assert.equal(await config.exists("nope"), false);
-
-  await config.delete("t.txt");
-  await assert.rejects(config.delete("t.txt"), (e) => e instanceof HttpError && e.status === 404);
+  await config.set("zoom", 2);
+  assert.equal(calls.at(-1).init.method, "PUT");
+  assert.equal(calls.at(-1).init.headers["content-type"], "application/json");
+  assert.deepEqual(JSON.parse(calls.at(-1).init.body), { zoom: 2 });
+  assert.deepEqual(await config.update({ count: 3, on: true }), { zoom: 2, count: 3, on: true });
+  await config.reset("zoom");
+  assert.deepEqual(JSON.parse(calls.at(-1).init.body), { zoom: null });
+  assert.deepEqual(await config.all(), { count: 3, on: true });
 });
 
-test("config refuses names that leave the directory and surfaces server errors", async () => {
-  const { salus, calls } = httpEnvironment(() => new Response("too big", { status: 413 }));
-  for (const bad of ["../x", "/abs", "a//b", "a/./b", "..", "a\\b", "c:x"]) {
-    await assert.rejects(salus.config.readText(bad), TypeError, bad);
-    await assert.rejects(salus.config.delete(bad), TypeError, bad);
+test("config surfaces the reason a change was refused", async () => {
+  const { salus } = httpEnvironment(() => new Response("'zoom' must be between 1 and 4", { status: 400 }));
+  await assert.rejects(salus.config.set("zoom", 9), (e) => e instanceof HttpError && e.status === 400 && /between/.test(e.body));
+  await assert.rejects(salus.config.set("zoom", null), TypeError);
+});
+
+// --- Lifecycle -----------------------------------------------------------------
+
+const lifecycle = (state) => frame("salus://lifecycle", bytes(state));
+const later = () => new Promise((resolve) => setTimeout(resolve, 5));
+
+test("lifecycle: spawn, then shown and hidden as Salus announces them, then destroyed", async () => {
+  const env = fakeEnvironment();
+  const salus = Salus.connect({ window: env.window });
+  const seen = [];
+  salus.onSpawn(() => seen.push("spawn"));
+  salus.onShown(() => seen.push("shown"));
+  salus.onHidden(() => seen.push("hidden"));
+  salus.onDestroyed(() => seen.push("destroyed"));
+  assert.equal(salus.visible, null);
+
+  env.deliver(lifecycle("shown")); // arrives before the spawn was delivered: keeps its place after it
+  assert.deepEqual(seen, []);
+  await later();
+  assert.deepEqual(seen, ["spawn", "shown"]);
+  assert.equal(salus.visible, true);
+
+  env.deliver(lifecycle("shown")); // repeats are not events
+  env.deliver(lifecycle("hidden"));
+  env.deliver(lifecycle("shown"));
+  env.deliver(lifecycle("nonsense"));
+  assert.deepEqual(seen, ["spawn", "shown", "hidden", "shown"]);
+
+  env.pagehide();
+  env.pagehide();
+  assert.deepEqual(seen, ["spawn", "shown", "hidden", "shown", "destroyed"]);
+  env.deliver(lifecycle("hidden")); // nothing happens after destruction
+  assert.equal(seen.length, 5);
+});
+
+test("lifecycle: a component that opens in the background starts hidden", async () => {
+  const env = fakeEnvironment();
+  const salus = Salus.connect({ window: env.window });
+  const seen = [];
+  salus.onShown(() => seen.push("shown"));
+  salus.onHidden(() => seen.push("hidden"));
+  await later();
+  env.deliver(lifecycle("hidden"));
+  assert.deepEqual(seen, ["hidden"]);
+  assert.equal(salus.visible, false);
+});
+
+test("lifecycle: handlers registered late are called with the current state; unsubscribe works; errors are contained", async () => {
+  const env = fakeEnvironment();
+  const salus = Salus.connect({ window: env.window });
+  await later();
+  env.deliver(lifecycle("shown"));
+  const seen = [];
+  salus.onSpawn(() => seen.push("spawn"));
+  salus.onShown(() => seen.push("shown"));
+  salus.onHidden(() => seen.push("hidden"));
+  await later();
+  assert.deepEqual(seen, ["spawn", "shown"]);
+
+  const stop = salus.onHidden(() => seen.push("never"));
+  stop();
+  salus.onHidden(() => { throw new Error("boom"); });
+  const originalError = console.error;
+  console.error = () => {};
+  try {
+    env.deliver(lifecycle("hidden"));
+  } finally {
+    console.error = originalError;
   }
-  await assert.rejects(salus.config.writeText("", "x"), TypeError);
-  await assert.rejects(salus.config.delete(""), TypeError);
-  assert.equal(calls.length, 0, "nothing is sent for invalid names");
-  await assert.rejects(salus.config.writeText("big", "x"), (e) => e instanceof HttpError && e.status === 413 && e.body === "too big");
+  assert.deepEqual(seen, ["spawn", "shown", "hidden"]);
+  assert.throws(() => salus.onShown("not a function"), TypeError);
+});
+
+test("lifecycle: a closed SDK never spawns, and close() stops listening for the page unload", async () => {
+  const env = fakeEnvironment();
+  const salus = Salus.connect({ window: env.window });
+  const seen = [];
+  salus.onSpawn(() => seen.push("spawn"));
+  salus.onDestroyed(() => seen.push("destroyed"));
+  salus.close();
+  await later();
+  env.pagehide();
+  assert.deepEqual(seen, []);
 });
 
 // --- Requests, dependencies and peers -----------------------------------------

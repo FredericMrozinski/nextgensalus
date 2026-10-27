@@ -3,9 +3,8 @@ use api::framework_web_api;
 use dioxus::core::spawn_forever;
 use dioxus::prelude::*;
 
-/// Row of tabs for one panel, plus the "new tab" button. Mirrors a browser's
-/// tab strip: click a tab to switch to it, click its close button to remove
-/// it, click "+" to open the plugin picker for this panel.
+/// Row of tabs for one panel. Mirrors a browser's tab strip: click a tab to
+/// switch to it, click its close button to remove it.
 #[component]
 pub fn TabBar(panel_id: PanelId) -> Element {
     let workspace = use_context::<WorkspaceState>();
@@ -23,12 +22,6 @@ pub fn TabBar(panel_id: PanelId) -> Element {
                         active: workspace.is_active(panel_id, tab.id),
                     }
                 }
-            }
-            button {
-                class: "new-tab-button",
-                title: "New tab",
-                onclick: move |_| workspace.open_plugin_picker(panel_id),
-                "+"
             }
         }
     }
