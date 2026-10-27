@@ -80,12 +80,18 @@ pub fn run_server(app: fn() -> Element) {
         // they live under the same prefix as the assets and the server functions.
         let app_router = axum::Router::new()
             .route("/assets/theme.css", routing::get(theme_css))
+            .route("/assets/icon.svg", routing::get(|| async { icon("image/svg+xml", include_bytes!("../../web/assets/icons/icon.svg")) }))
+            .route("/assets/icon-32.png", routing::get(|| async { icon("image/png", include_bytes!("../../web/assets/icons/icon-32.png")) }))
+            .route("/assets/icon-180.png", routing::get(|| async { icon("image/png", include_bytes!("../../web/assets/icons/icon-180.png")) }))
+            .route("/assets/icon-512.png", routing::get(|| async { icon("image/png", include_bytes!("../../web/assets/icons/icon-512.png")) }))
             .nest("/plugins", protected_pfe_asset_fetcher)
             .merge(plugin_api)
             .merge(plugin_config)
             .route("/plugin-stream", routing::get(browser_connections::plugin_stream))
             .route("/dev/login", routing::get(session_manager::dev_login)) // TODO remove the dev/login
-            .serve_dioxus_application(dioxus::server::ServeConfig::new(), app);
+            .serve_dioxus_application(dioxus::server::ServeConfig::new(), app)
+            // Whoever opens Salus without a session goes to the login page first.
+            .layer(axum::middleware::from_fn(session_manager::require_session));
         let router = under_base_path(app_router);
 
         Ok(router)
@@ -105,6 +111,19 @@ fn under_base_path(router: axum::Router) -> axum::Router {
     axum::Router::new()
         .nest(&format!("{base}/"), router)
         .route(&base, routing::get(move || async move { axum::response::Redirect::to(&format!("{last}/")) }))
+}
+
+/// The app icon, in the sizes the page and the login page link to. Served by the server itself (not bundled by `dx`), so the URLs are
+/// fixed and the login page, which is not a Dioxus page, can use them too.
+#[cfg(feature = "server")]
+fn icon(content_type: &'static str, bytes: &'static [u8]) -> impl axum::response::IntoResponse {
+    (
+        [
+            (axum::http::header::CONTENT_TYPE, content_type),
+            (axum::http::header::CACHE_CONTROL, "public, max-age=86400"),
+        ],
+        bytes,
+    )
 }
 
 /// The theme stylesheet Salus injects into plugin frontends (and uses for its own workspace).

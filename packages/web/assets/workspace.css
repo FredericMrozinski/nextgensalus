@@ -254,32 +254,76 @@ html, body {
     align-items: center;
     border-bottom: 1px solid var(--salus-border);
     background-color: var(--salus-surface-alt);
-    padding: 4px 4px 0 4px;
+    padding: 5px;
     flex-shrink: 0;
+    position: relative;
+    isolation: isolate;
 }
 
+/* Grain over the whole tab bar, below the tabs (same texture as the dock's). */
+.tab-bar::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3CfeComponentTransfer%3E%3CfeFuncR type='linear' slope='3' intercept='-1'/%3E%3CfeFuncG type='linear' slope='3' intercept='-1'/%3E%3CfeFuncB type='linear' slope='3' intercept='-1'/%3E%3C/feComponentTransfer%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+    background-size: 160px 160px;
+    mix-blend-mode: hard-light;
+    opacity: 0.07;
+    pointer-events: none;
+}
+
+/* The list covers the whole bar (negative margin cancels the padding), so the glow of the open tab, which the list clips,
+   can spread over the bar's full height. It scrolls sideways without showing any scrollbar. */
 .tab-list {
     display: flex;
     flex-direction: row;
     overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
     flex: 1;
     min-width: 0;
+    margin: -5px;
+    padding: 5px;
+}
+
+.tab-list::-webkit-scrollbar {
+    display: none;
 }
 
 .tab {
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 5px 10px 6px;
-    margin-right: 4px;
+    padding: 5px 10px;
+    margin-right: 5px;
     border: 1px solid var(--salus-border);
-    border-bottom: none;
-    border-radius: 6px 6px 0 0;
+    border-radius: 8px;
     background-color: transparent;
     color: var(--salus-fg-muted);
     cursor: pointer;
     white-space: nowrap;
     user-select: none;
+    position: relative;
+    flex-shrink: 0;
+}
+
+/* Glow: the open tab is the light source, a blurred dot of the accent color behind it. */
+.tab-active::before {
+    content: "";
+    position: absolute;
+    z-index: -1;
+    left: 50%;
+    top: 50%;
+    width: 150px;
+    height: 80px;
+    transform: translate(-50%, -50%);
+    background: radial-gradient(ellipse closest-side,
+        color-mix(in srgb, var(--salus-accent) 32%, transparent) 0%,
+        color-mix(in srgb, var(--salus-accent) 10%, transparent) 55%,
+        transparent 100%);
+    filter: blur(14px);
+    pointer-events: none;
 }
 
 .tab:hover {

@@ -38,7 +38,13 @@ fn App() -> Element {
         frontend_communication_relay::init_plugin_bridge();
     });
 
+    // The app icon (served by the server, see `api::run_server`): SVG where the browser takes it, PNG for Safari and the
+    // home screen.
     rsx! {
+        document::Title { "Salus" }
+        document::Link { rel: "icon", r#type: "image/svg+xml", href: api::base_url::with_base("/assets/icon.svg") }
+        document::Link { rel: "icon", r#type: "image/png", sizes: "32x32", href: api::base_url::with_base("/assets/icon-32.png") }
+        document::Link { rel: "apple-touch-icon", href: api::base_url::with_base("/assets/icon-180.png") }
         Workspace {}
     }
 }

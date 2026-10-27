@@ -54,6 +54,7 @@ dependencies = [
  "time",
  "tokio",
  "toml",
+ "tower",
  "windows-sys 0.61.2",
 ]
 

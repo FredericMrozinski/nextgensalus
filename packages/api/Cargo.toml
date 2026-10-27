@@ -27,3 +27,6 @@ time = "0.3.55"
 
 [features]
 server = ["dioxus/server", "dep:axum", "dep:tokio", "dep:matchit"]
+
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }
