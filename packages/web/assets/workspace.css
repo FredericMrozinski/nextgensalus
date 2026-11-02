@@ -180,7 +180,7 @@ html, body {
     height: 34px;
     padding: 5px;
     overflow: hidden;
-    border: 1.5px solid var(--salus-accent);
+    border: 1px solid var(--salus-accent);
     border-radius: 9px;
     background: color-mix(in srgb, var(--salus-accent) 28%, transparent);
 }
