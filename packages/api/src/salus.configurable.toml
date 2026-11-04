@@ -16,3 +16,12 @@ green one, dark-oled is pure black with purple surfaces and a bright green accen
 type = "choice"
 choices = ["dark", "light", "light-red", "dark-green", "dark-oled", "midnight"]
 default = "dark"
+
+[[setting]]
+key = "autostart"
+name = "Autostart"
+description = """Plugins (their identifiers, e.g. org.salus.systeminfo) that Salus opens on its own after you log in, in this \
+order, as if you had opened each from the dock. Reloading the page does not open them again. Identifiers of plugins that are \
+not installed, or that cannot be opened from the dock, are skipped."""
+type = "plugin-list"
+default = []

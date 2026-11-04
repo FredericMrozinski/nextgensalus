@@ -1,3 +1,4 @@
+mod autostart;
 mod dock;
 mod panel;
 mod resize_handle;
@@ -69,6 +70,24 @@ pub fn Workspace() -> Element {
                 workspace.show_viewer_picker(request);
             }
         }
+    });
+
+    // Right after a login (not on every page load), Salus opens the plugins of its `autostart` setting, as if each had
+    // been opened from the dock. Unknown plugins are skipped by the server.
+    use_effect(move || {
+        if !autostart::take_login_marker() {
+            return;
+        }
+        spawn(async move {
+            match api::framework_web_api::open_autostart_plugins(Some(crate::frontend_communication_relay::page_id())).await {
+                Ok(components) => {
+                    for component in components {
+                        workspace.open_tab(component.target_panel.into(), TabContent::Component(component));
+                    }
+                }
+                Err(err) => error!("Could not open the autostart plugins: {err}"),
+            }
+        });
     });
 
     // Theme: the server knows it (a setting of Salus). Start with the one shown last time, ask the server, and follow

@@ -61,6 +61,22 @@ pub fn get_plugin_by_identifier(identifier: &str) -> Option<(u32, Plugin)> {
         .map(|(id, plugin)| (*id, plugin.clone()))
 }
 
+/// The installed plugins among `identifiers` that can be opened from the dock (they have an entry component), in the
+/// order given and each once. Identifiers of plugins that are not installed, or that have no entry component, are skipped.
+pub fn openable_plugins(identifiers: &[String]) -> Vec<u32> {
+    let plugins = plugins().lock().unwrap();
+    let mut ids: Vec<u32> = Vec::new();
+    for identifier in identifiers {
+        let found = plugins.iter().find(|(_, plugin)| plugin.identifier() == *identifier && plugin.entry_component().is_some());
+        match found {
+            Some((id, _)) if !ids.contains(id) => ids.push(*id),
+            Some(_) => {}
+            None => debug!("Skipping {identifier:?}: no such plugin installed, or it has no entry component."),
+        }
+    }
+    ids
+}
+
 /// Components that can display files with the given extension (lowercase, without dot).
 pub fn get_file_viewers(extension: &str) -> Vec<FileViewer> {
     let extension = extension.to_lowercase();

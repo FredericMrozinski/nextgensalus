@@ -72,6 +72,14 @@ pub async fn open_plugin(plugin_id: u32, page_id: Option<String>) -> Result<Spaw
     plugin_process_manager::open_plugin_entry(plugin_id, &user, page_id).map_err(ServerFnError::new)
 }
 
+/// Opens the plugins of the `autostart` setting (their entry components), in its order. The workspace calls this once
+/// after a login, not on every page load. Plugins that are not installed are skipped; the list may be empty.
+#[server]
+pub async fn open_autostart_plugins(page_id: Option<String>) -> Result<Vec<SpawnedComponent>, ServerFnError> {
+    let user = session_user().await?;
+    Ok(plugin_process_manager::open_autostart_plugins(&user, page_id))
+}
+
 /// Opens a component on behalf of a running frontend, which becomes its parent.
 /// `plugin = None` opens a component of the requester's own plugin (then `component` is required);
 /// otherwise `plugin` must be listed under `[dependencies]` of the requester's plugin, and

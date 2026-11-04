@@ -9,7 +9,7 @@
 //! key = "zoom"                  # name in the config file, [A-Za-z0-9_-]+
 //! name = "Zoom step"            # display name
 //! description = "How far one click zooms."
-//! type = "float"                # int, float, bool, string, choice, file-path or directory-path
+//! type = "float"                # int, float, bool, string, choice, file-path, directory-path or plugin-list
 //! default = 1.5                 # optional; a setting without one is simply unset
 //! min = 1.0                     # int and float only, optional
 //! max = 4.0
@@ -31,10 +31,13 @@ pub enum SettingType {
     Choice,
     FilePath,
     DirectoryPath,
+    /// A list of plugin identifiers (folder names), e.g. the plugins Salus opens on login. Plugins that are not
+    /// installed may be listed (they are skipped where the list is used).
+    PluginList,
 }
 
 impl SettingType {
-    pub const ALL: [(&'static str, SettingType); 7] = [
+    pub const ALL: [(&'static str, SettingType); 8] = [
         ("int", SettingType::Int),
         ("float", SettingType::Float),
         ("bool", SettingType::Bool),
@@ -42,6 +45,7 @@ impl SettingType {
         ("choice", SettingType::Choice),
         ("file-path", SettingType::FilePath),
         ("directory-path", SettingType::DirectoryPath),
+        ("plugin-list", SettingType::PluginList),
     ];
 
     pub fn name(self) -> &'static str {
@@ -97,6 +101,19 @@ impl Setting {
                 Some(choice) if self.choices.iter().any(|c| c == choice) => Ok(value.clone()),
                 _ => Err(format!("'{}' expects one of: {}", self.key, self.choices.join(", "))),
             },
+            SettingType::PluginList => {
+                let Some(items) = value.as_array() else { return fail("a list of plugin identifiers") };
+                // Canonical form: trimmed, without empty entries and without repeating an identifier (the first one counts).
+                let mut list: Vec<String> = Vec::new();
+                for item in items {
+                    let Some(identifier) = item.as_str() else { return fail("a list of plugin identifiers") };
+                    let identifier = identifier.trim();
+                    if !identifier.is_empty() && !list.iter().any(|known| known == identifier) {
+                        list.push(identifier.to_string());
+                    }
+                }
+                Ok(json!(list))
+            }
         }
     }
 
@@ -305,6 +322,11 @@ default = "fast"
 key = "dir"
 name = "Directory"
 type = "directory-path"
+
+[[setting]]
+key = "plugins"
+name = "Plugins"
+type = "plugin-list"
 "#;
 
     fn map(value: Value) -> Map<String, Value> {
@@ -314,7 +336,11 @@ type = "directory-path"
     #[test]
     fn parses_all_the_parts_of_a_setting() {
         let c = Configurable::parse(SAMPLE).unwrap();
-        assert_eq!(c.settings.len(), 4);
+        assert_eq!(c.settings.len(), 5);
+        assert_eq!(c.setting("plugins").unwrap().kind, SettingType::PluginList);
+        assert_eq!(c.setting("plugins").unwrap().default, None);
+        let with_default = Configurable::parse("[[setting]]\nkey = \"p\"\nname = \"P\"\ntype = \"plugin-list\"\ndefault = [\"org.a\", \"org.a\"]").unwrap();
+        assert_eq!(with_default.setting("p").unwrap().default, Some(json!(["org.a"])), "the default is kept in canonical form");
         let zoom = c.setting("zoom").unwrap();
         assert_eq!((zoom.kind, zoom.min, zoom.max), (SettingType::Float, Some(1.0), Some(4.0)));
         assert_eq!(zoom.default, Some(json!(1.5)));
@@ -357,6 +383,18 @@ type = "directory-path"
         assert!(c.setting("mode").unwrap().validate(&json!("slow")).is_err());
         assert!(c.setting("dir").unwrap().validate(&json!("/tmp")).is_ok());
         assert!(c.setting("dir").unwrap().validate(&json!(true)).is_err());
+    }
+
+    #[test]
+    fn plugin_lists_are_lists_of_identifiers_in_canonical_form() {
+        let c = Configurable::parse(SAMPLE).unwrap();
+        let plugins = c.setting("plugins").unwrap();
+        assert_eq!(plugins.validate(&json!([" org.a ", "", "org.b", "org.a"])).unwrap(), json!(["org.a", "org.b"]));
+        assert_eq!(plugins.validate(&json!([])).unwrap(), json!([]));
+        assert!(plugins.validate(&json!("org.a")).is_err());
+        assert!(plugins.validate(&json!(["org.a", 1])).is_err());
+        assert!(Configurable::parse("[[setting]]\nkey = \"k\"\nname = \"N\"\ntype = \"plugin-list\"\ndefault = \"x\"").is_err());
+        assert_eq!(plugins.to_json()["type"], "plugin-list");
     }
 
     #[test]

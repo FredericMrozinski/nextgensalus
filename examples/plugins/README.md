@@ -32,6 +32,8 @@ It lists any directory the server process can read; until the framework sandboxe
 Shows the settings of Salus and of every plugin (the plugins on the left, the settings of the selected one on the right) and saves changes
 right away. It does not read any settings itself: it asks the framework's settings API (`/settings-api/<frontend id>`, only available to this
 plugin), which returns the configurables and reads and writes the config files. Its backend does nothing. Opens in the center panel from the dock.
+A `plugin-list` setting (such as `autostart` of Salus) is edited as a list: add a plugin by its identifier (the installed ones are suggested),
+move it up or down, or remove it; identifiers of plugins that are not installed are marked.
 
 ## org.salus.terminal
 

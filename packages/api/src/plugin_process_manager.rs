@@ -11,7 +11,7 @@ use crate::plugin_backend_executor::{self, BackendPluginSocketHandle};
 use std::process;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use dioxus::prelude::debug;
+use dioxus::prelude::{debug, warn};
 use tokio::task::JoinHandle;
 use tokio::net::UnixListener;
 use crate::plugin_message_router::{self, Stream};
@@ -318,6 +318,25 @@ pub fn open_plugin_entry(plugin_id: u32, user: &User, page_id: Option<String>) -
     open_component_process(plugin_id, &plugin, &component, None, None, false, user, page_id)
 }
 
+/// Opens the entry components of the plugins in the `autostart` setting of Salus, for a user who has just logged in.
+/// Plugins that are not installed are skipped; a plugin that fails to open is logged and skipped, so the others still open.
+pub fn open_autostart_plugins(user: &User, page_id: Option<String>) -> Vec<SpawnedComponent> {
+    open_plugins_in_order(&crate::config_loader::autostart(), user, page_id)
+}
+
+fn open_plugins_in_order(identifiers: &[String], user: &User, page_id: Option<String>) -> Vec<SpawnedComponent> {
+    plugin_library::openable_plugins(identifiers)
+        .into_iter()
+        .filter_map(|plugin_id| match open_plugin_entry(plugin_id, user, page_id.clone()) {
+            Ok(component) => Some(component),
+            Err(e) => {
+                warn!("Autostart: could not open plugin {plugin_id}: {e}");
+                None
+            }
+        })
+        .collect()
+}
+
 /// What a frontend asks to open.
 pub enum ComponentTarget {
     /// A component of the requester's own plugin.
@@ -528,6 +547,22 @@ mod tests {
         assert!(open(555, ComponentTarget::Own { component: "main".into() }).is_err());                                   // unknown frontend
         assert!(open_component(990_101, ComponentTarget::Own { component: "main".into() }, None, false, &User { user_id: 8 }, None).is_err()); // other user
         assert!(open_component(990_101, ComponentTarget::Own { component: "side".into() }, Some("{not json".into()), false, &owner, None).is_err()); // bad params
+    }
+
+    #[test]
+    fn autostart_resolves_installed_openable_plugins_in_order_and_skips_the_rest() {
+        plugin_library::insert_test_plugin(990_021, plugin("test.auto.a", &[], Some("main"), vec![component("main", TargetPanel::Center, &[])]));
+        plugin_library::insert_test_plugin(990_022, plugin("test.auto.b", &[], Some("main"), vec![component("main", TargetPanel::Left, &[])]));
+        plugin_library::insert_test_plugin(990_023, plugin("test.auto.noentry", &[], None, vec![component("main", TargetPanel::Left, &[])]));
+        let list = |ids: &[&str]| ids.iter().map(|id| id.to_string()).collect::<Vec<_>>();
+
+        let ids = plugin_library::openable_plugins(&list(&["test.auto.b", "test.auto.missing", "test.auto.noentry", "test.auto.a", "test.auto.b"]));
+        assert_eq!(ids, [990_022, 990_021], "in the order of the setting, each once, unknown and dock-less plugins skipped");
+        assert!(plugin_library::openable_plugins(&list(&["test.auto.missing", ""])).is_empty());
+        assert!(plugin_library::openable_plugins(&[]).is_empty());
+
+        // nothing to open: no process is spawned and nothing fails
+        assert!(open_plugins_in_order(&list(&["test.auto.missing", "test.auto.noentry"]), &User { user_id: 7 }, None).is_empty());
     }
 
     #[test]

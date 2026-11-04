@@ -121,6 +121,20 @@ pub fn theme() -> String {
         .to_string()
 }
 
+/// Identifiers of the plugins to open after a login (`autostart` in `salus.toml`), in their order. Read on every call,
+/// so a change in the settings applies at the next login without a restart. Whether they are installed is not checked here.
+pub fn autostart() -> Vec<String> {
+    autostart_from(&load_effective(&framework_config_path(), salus_configurable()))
+}
+
+fn autostart_from(values: &Map<String, Value>) -> Vec<String> {
+    values
+        .get("autostart")
+        .and_then(Value::as_array)
+        .map(|list| list.iter().filter_map(Value::as_str).map(str::to_string).collect())
+        .unwrap_or_default()
+}
+
 /// Where plugins are installed: `plugins_dir` from `salus.toml`, else the `plugins` folder of the data directory.
 pub fn plugins_dir() -> PathBuf {
     match &framework_config().plugins_dir {
@@ -299,6 +313,7 @@ mod tests {
         let text = fs::read_to_string(&path).unwrap();
         assert!(text.contains("# theme = \"dark\""), "{text}");
         assert!(text.contains("# plugins_dir = \"\""), "{text}");
+        assert!(text.contains("# autostart = []"), "{text}");
         assert!(read_stored(&path).unwrap().is_empty(), "everything is commented out");
         assert_eq!(Value::Object(load_effective(&path, c)), Value::Object(c.effective(&Map::new())));
 
@@ -357,5 +372,17 @@ mod tests {
         let values = c.effective(&updates(json!({"plugins_dir": "/opt/plugins"})));
         assert_eq!(framework_config_from(&values).plugins_dir, Some(PathBuf::from("/opt/plugins")));
         assert_eq!(Path::new("/root/config").join("/opt/plugins"), Path::new("/opt/plugins"));
+    }
+
+    #[test]
+    fn autostart_is_empty_by_default_and_read_from_the_values() {
+        let c = salus_configurable();
+        assert_eq!(autostart_from(&c.effective(&Map::new())), Vec::<String>::new());
+        let values = c.effective(&updates(json!({"autostart": ["org.salus.systeminfo", "org.nope"]})));
+        assert_eq!(autostart_from(&values), ["org.salus.systeminfo", "org.nope"]);
+        let path = temp_dir("autostart").join("salus.toml");
+        update(&path, c, &updates(json!({"autostart": ["org.a", " org.a", "org.b"]}))).unwrap();
+        assert!(fs::read_to_string(&path).unwrap().contains("autostart = ["), "stored as a TOML array");
+        assert_eq!(autostart_from(&load_effective(&path, c)), ["org.a", "org.b"]);
     }
 }

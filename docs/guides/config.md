@@ -61,6 +61,7 @@ type = "directory-path"                 # no default: unset until the user choos
 | `choice` | one of `choices` | |
 | `file-path` | text | A path to a file. Salus does not check that it exists. |
 | `directory-path` | text | A path to a folder. Salus does not check that it exists. |
+| `plugin-list` | list of strings | Plugin identifiers (folder names), e.g. `["org.salus.terminal"]`. Stored trimmed, without empty entries or repeats. Salus does not check that the plugins are installed. The settings plugin edits it as a list and suggests the installed plugins. |
 
 A configurable that cannot be read (unknown type, a default that does not fit, a duplicate key, ...) stops the plugin from loading; the
 server log says why. Salus has a configurable of its own, built into the server.
@@ -128,6 +129,7 @@ setting commented out (so it also lists what can be configured). The plugins' fi
 |---|---|---|
 | `theme` | `dark` | The colors of Salus and all plugins: `dark`, `light`, `light-red`, `dark-green`, `dark-oled` or `midnight`. Applies at once. See [Theming](theming.md). |
 | `plugins_dir` | empty | Where plugins are installed. Empty means `plugins/` in the platform's data directory. A relative path is taken relative to the config root. Applies after a restart. |
+| `autostart` | `[]` | Plugins that Salus opens on its own after a login, in this order, as if each had been opened from the dock (their entry components). Only the page the login page leads to (`?from=login`) opens them, not a reload. Plugins that are not installed or have no entry component are skipped. Applies at the next login. |
 
 ## How the two sides get there
 
