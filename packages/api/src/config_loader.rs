@@ -100,13 +100,37 @@ fn create_default_config(path: &Path, configurable: &Configurable) -> io::Result
     }
 }
 
+/// Where the configuration goes instead of the platform's config directory, if the server was *built* with
+/// `SALUS_CONFIG_DIR` set (`SALUS_CONFIG_DIR=/srv/salus/config dx build`). Read by the compiler, not at runtime: a build
+/// without it uses the platform's config directory. Cargo rebuilds when the variable changes.
+const CONFIG_DIR_AT_BUILD: Option<&str> = option_env!("SALUS_CONFIG_DIR");
+
 pub fn config_root() -> PathBuf {
     let dirs = ProjectDirs::from("org", "fredericmrozinski", "salus").expect("could not determine home directory");
-    config_root_for(dirs.config_dir(), dirs.data_dir())
+    match CONFIG_DIR_AT_BUILD.map(str::trim).filter(|dir| !dir.is_empty()) {
+        Some(dir) => {
+            let home = directories::BaseDirs::new().expect("could not determine home directory").home_dir().to_path_buf();
+            config_root_for(&chosen_config_dir(dir, &home), dirs.data_dir())
+        }
+        None => config_root_for(dirs.config_dir(), dirs.data_dir()),
+    }
+}
+
+/// The folder `SALUS_CONFIG_DIR` names: an absolute path as it is; `~` and `~/…` in the home directory; any other relative
+/// path relative to the home directory (not to the folder the server happens to be started in).
+fn chosen_config_dir(dir: &str, home: &Path) -> PathBuf {
+    if dir == "~" {
+        return home.to_path_buf();
+    }
+    match dir.strip_prefix("~/") {
+        Some(rest) => home.join(rest),
+        None => home.join(dir), // an absolute `dir` replaces `home`
+    }
 }
 
 /// On macOS the config and data directories are the same. The plugin installations live in
-/// `<data dir>/plugins`, so the configuration goes into a `config` folder of its own there.
+/// `<data dir>/plugins`, so the configuration goes into a `config` folder of its own there. The same holds for a
+/// `SALUS_CONFIG_DIR` that names the data directory.
 fn config_root_for(config_dir: &Path, data_dir: &Path) -> PathBuf {
     if config_dir == data_dir { config_dir.join("config") } else { config_dir.to_path_buf() }
 }
@@ -350,6 +374,19 @@ mod tests {
         let same = Path::new("/home/u/Library/Application Support/salus");
         assert_eq!(config_root_for(same, same), same.join("config"));
         assert_eq!(config_root_for(Path::new("/home/u/.config/salus"), Path::new("/home/u/.local/share/salus")), Path::new("/home/u/.config/salus"));
+    }
+
+    #[test]
+    fn a_config_dir_chosen_at_build_time_is_resolved_against_the_home_directory() {
+        let home = Path::new("/home/u");
+        assert_eq!(chosen_config_dir("/srv/salus/config", home), Path::new("/srv/salus/config"));
+        assert_eq!(chosen_config_dir("~", home), home);
+        assert_eq!(chosen_config_dir("~/salus-config", home), Path::new("/home/u/salus-config"));
+        assert_eq!(chosen_config_dir("salus-config", home), Path::new("/home/u/salus-config"));
+        // naming the data directory still keeps the configuration apart from the installed plugins
+        let data = Path::new("/home/u/.local/share/salus");
+        assert_eq!(config_root_for(&chosen_config_dir("/home/u/.local/share/salus", home), data), data.join("config"));
+        assert_eq!(config_root_for(&chosen_config_dir("/srv/cfg", home), data), Path::new("/srv/cfg"));
     }
 
     #[test]

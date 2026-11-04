@@ -118,6 +118,21 @@ which also holds the installed plugins in `plugins/`. There the config root is i
     └── plugins/<plugin folder name>.toml
 ```
 
+### Choosing the config folder when building Salus
+
+Set `SALUS_CONFIG_DIR` when **building** the server to put the configuration somewhere else, for example on a shared
+server or in a container:
+
+```sh
+SALUS_CONFIG_DIR=/srv/salus/config dx build      # or dx serve, cargo build ...
+```
+
+That folder is then the config root (`salus.toml` and `plugins/` directly in it). An absolute path is used as it is; `~/…` and
+other relative paths are taken relative to the home directory of the user running Salus. The variable is read by the compiler,
+not when the server starts: a build without it uses the operating system's location above, and setting it later has no effect
+until Salus is built again (Cargo rebuilds when it changes). The server log names the folder at start (`Framework configuration: …`).
+It only moves the configuration; the plugins directory is still chosen by `plugins_dir`.
+
 `<plugin folder name>` is the name of your plugin's folder in the plugins directory. Users may edit the files by hand; Salus
 ignores values that no longer fit the configurable. A file that is not valid TOML is reported in the server log, read as empty, and
 **not overwritten** (changes are refused until it is fixed). Salus rewrites the file when a setting changes, so comments in it are not kept. If `salus.toml` is missing, Salus creates it again at start with every
