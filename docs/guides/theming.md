@@ -36,6 +36,7 @@ The stylesheet defines CSS variables. Use them in your own CSS instead of fixed 
 | `--salus-surface`, `--salus-surface-alt`, `--salus-surface-2`, `--salus-surface-3` | Cards, panels, hover and pressed states (increasing emphasis) |
 | `--salus-gap` | The workspace background between the panels (a bit darker than `--salus-bg`). Salus uses it itself; plugins rarely need it. |
 | `--salus-border` | Borders and separators |
+| `--salus-border-button` | Outline of buttons: a more pronounced version of `--salus-border` (the default button style uses it) |
 | `--salus-fg`, `--salus-fg-muted`, `--salus-fg-faint` | Text, secondary text, hints |
 | `--salus-accent`, `--salus-accent-fg` | Primary action color and text on it |
 | `--salus-danger`, `--salus-warning`, `--salus-success` | Status colors |
