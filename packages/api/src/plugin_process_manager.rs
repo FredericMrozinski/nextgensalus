@@ -478,6 +478,7 @@ mod tests {
                 backend_specs: PluginBackendSpecification {
                     entry_point_file_path: "backend/plugin.py".into(),
                     lifetime: BackendLifetime::System(true),
+                    install_script_file_path: None
                 },
                 frontend_components: components,
                 description: PluginDescription {
