@@ -16,6 +16,7 @@ pub struct PluginDescription {
 pub struct PluginBackendSpecification {
     pub entry_point_file_path: String,
     pub lifetime: BackendLifetime,
+    pub install_script_file_path: Option<String>,
 }
 
 /// Panel of the workspace a frontend component opens in.
