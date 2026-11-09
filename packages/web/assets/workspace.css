@@ -36,7 +36,7 @@ html, body {
     overflow: hidden;
     transition: width 0.15s ease;
     border-right: 1px solid var(--salus-border);
-    background-color: var(--salus-surface-alt);
+    background-color: var(--salus-depth-default, var(--salus-surface-alt)); /* the dock and the tab bars: default (docs/guides/theming.md, Depth) */
 }
 
 /* Glow: a blurred dot of the accent color sits behind the "all plugins" button and radiates up and down.
@@ -118,6 +118,9 @@ html, body {
     min-height: 0;
     overflow-y: auto;
     overflow-x: hidden;
+    /* The list clips what overflows it; this reaches out to the dock's edges so the icons' glow isn't cut off. */
+    margin: -8px;
+    padding: 8px;
 }
 
 .dock-search {
@@ -177,9 +180,11 @@ html, body {
     flex-shrink: 0;
 }
 
-/* Every plugin icon sits in the same rounded square: translucent accent fill, solid accent border. The image inside is
-   turned into a silhouette (the theme's icon color: white or black), so it looks right whatever colors the plugin's file has. */
+/* Every plugin icon sits in the same rounded square: translucent accent fill, a 1px stroke and a faint accent glow that
+   grows when the item is hovered. The image inside is turned into a silhouette (the theme's icon color: white or black),
+   so it looks right whatever colors the plugin's file has. */
 .dock-icon-frame {
+    position: relative;
     flex-shrink: 0;
     display: flex;
     align-items: center;
@@ -187,11 +192,32 @@ html, body {
     box-sizing: border-box;
     width: 34px;
     height: 34px;
-    padding: 5px;
+    padding: 6px;
     overflow: hidden;
-    border: 1px solid var(--salus-accent);
     border-radius: 9px;
     background: color-mix(in srgb, var(--salus-accent) 28%, transparent);
+    /* test: no glow at rest, only on hover (the old resting glow: 0 0 18px 3px, accent 22%) */
+    box-shadow: 0 0 18px 3px transparent;
+    transition: box-shadow 0.2s ease;
+}
+
+/* The stroke: a top-down gradient from pale blue (the open tab's stroke colour) to the accent, cut to a 1px ring with a mask so the translucent fill stays see-through. */
+.dock-icon-frame::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    padding: 1px;
+    border-radius: inherit;
+    /* top down: pale blue at the top, full accent at the bottom */
+    background: linear-gradient(color-mix(in srgb, var(--salus-accent) 55%, #ffffff), var(--salus-accent));
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
+    pointer-events: none;
+}
+
+.dock-item:hover:not(:disabled) .dock-icon-frame {
+    box-shadow: 0 0 24px 6px color-mix(in srgb, var(--salus-accent) 55%, transparent);
 }
 
 .dock-icon {
@@ -251,7 +277,8 @@ html, body {
     min-height: 0;
     border: 1px solid var(--salus-border);
     border-radius: 6px;
-    background-color: var(--salus-surface);
+    /* background-1, like a plugin page, so an empty panel matches a full one */
+    background-color: var(--salus-depth-background-1, var(--salus-surface));
     overflow: hidden;
 }
 
@@ -261,8 +288,9 @@ html, body {
     display: flex;
     flex-direction: row;
     align-items: center;
-    border-bottom: 1px solid var(--salus-border);
-    background-color: var(--salus-surface-alt);
+    border-bottom: 2px solid var(--salus-separator-dark);
+    border-image: var(--salus-separator-below);
+    background-color: var(--salus-depth-default, var(--salus-surface-alt)); /* the dock and the tab bars: default (docs/guides/theming.md, Depth) */
     padding: 5px;
     flex-shrink: 0;
     position: relative;
@@ -308,7 +336,7 @@ html, body {
     margin-right: 5px;
     border: 1px solid var(--salus-border);
     border-radius: 8px;
-    background-color: transparent;
+    background-color: var(--salus-depth-default, transparent); /* tabs: default */
     color: var(--salus-fg-muted);
     cursor: pointer;
     white-space: nowrap;
@@ -324,12 +352,12 @@ html, body {
     z-index: -1;
     left: 50%;
     top: 50%;
-    width: 150px;
-    height: 80px;
+    width: 190px;
+    height: 100px;
     transform: translate(-50%, -50%);
     background: radial-gradient(ellipse closest-side,
-        color-mix(in srgb, var(--salus-accent) 32%, transparent) 0%,
-        color-mix(in srgb, var(--salus-accent) 10%, transparent) 55%,
+        color-mix(in srgb, var(--salus-accent) 60%, transparent) 0%,
+        color-mix(in srgb, var(--salus-accent) 24%, transparent) 55%,
         transparent 100%);
     filter: blur(14px);
     pointer-events: none;
@@ -341,8 +369,14 @@ html, body {
 
 .tab-active,
 .tab-active:hover {
-    border-color: var(--salus-accent);
-    background-color: var(--salus-surface);
+    /* The stroke is a radial gradient, a circle centred on the tab, white near the middle of the top
+       and bottom edges, fading to the accent towards the ends, laid in the transparent 1px border
+       under the tab's fill (same technique as the raised buttons in theme.css). */
+    --tab-fill: var(--salus-depth-default, var(--salus-surface));
+    border-color: transparent;
+    background:
+        linear-gradient(var(--tab-fill), var(--tab-fill)) padding-box,
+        radial-gradient(circle farthest-side, color-mix(in srgb, var(--salus-accent) 55%, #ffffff) 0%, var(--salus-accent) 70%) border-box;
     color: var(--salus-fg);
 }
 
@@ -470,7 +504,8 @@ html, body {
     align-items: center;
     justify-content: space-between;
     padding: 10px 12px;
-    border-bottom: 1px solid var(--salus-border);
+    border-bottom: 2px solid var(--salus-separator-dark);
+    border-image: var(--salus-separator-below);
     font-size: 13px;
     font-weight: 600;
     color: var(--salus-fg);

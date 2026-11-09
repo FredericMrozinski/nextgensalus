@@ -347,8 +347,8 @@ mod tests {
 
         // the first change through the settings keeps working on the template
         fs::write(&path, text).unwrap();
-        let values = update(&path, c, &updates(json!({"theme": "midnight"}))).unwrap();
-        assert_eq!(values["theme"], "midnight");
+        let values = update(&path, c, &updates(json!({"theme": "light"}))).unwrap();
+        assert_eq!(values["theme"], "light");
     }
 
     #[test]

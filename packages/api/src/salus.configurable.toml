@@ -11,10 +11,9 @@ default = ""
 [[setting]]
 key = "theme"
 name = "Theme"
-description = """The colors of Salus and of all plugins. dark and light are the neutral themes; light-red has a red accent, dark-green a \\
-green one, dark-oled is pure black with purple surfaces and a bright green accent, and midnight a cyan accent on deep blue."""
+description = "The colors of Salus and of all plugins: dark or light."
 type = "choice"
-choices = ["dark", "light", "light-red", "dark-green", "dark-oled", "midnight"]
+choices = ["dark", "light"]
 default = "dark"
 
 [[setting]]
