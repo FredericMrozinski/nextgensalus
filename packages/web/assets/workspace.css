@@ -441,13 +441,81 @@ html, body {
 
 /* Resize handles */
 
+/* No fill: while hovered or dragged, a light of the accent color glows where the mouse is along the bar (--glow, set
+   by resize_handle.rs) - a bright core (white at the mouse, fading through pale
+   blue to the accent) and a faint, longer halo, clipped to the bar. */
 .resize-handle {
     flex-shrink: 0;
     background-color: transparent;
+    position: relative;
+    z-index: 2;
+    touch-action: none; /* a finger drags the bar instead of scrolling the page */
 }
 
-.resize-handle:hover {
-    background-color: var(--salus-accent);
+/* The glow's box: the bar itself, clipping the glow so it doesn't spill over the panels. */
+.resize-glow {
+    position: absolute;
+    inset: 0;
+    overflow: hidden;
+    pointer-events: none;
+}
+
+/* A finger needs more than the bar's 6px: the handle reaches a bit over the panels' edges where touch is the input. */
+@media (pointer: coarse) {
+    .resize-handle::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+    }
+
+    .resize-handle-horizontal::after {
+        left: -10px;
+        right: -10px;
+    }
+
+    .resize-handle-vertical::after {
+        top: -10px;
+        bottom: -10px;
+    }
+}
+
+.resize-glow::before {
+    content: "";
+    position: absolute;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.2s ease;
+    filter: blur(3px);
+}
+
+.resize-handle-glowing .resize-glow::before {
+    opacity: 1;
+}
+
+.resize-handle-horizontal .resize-glow::before {
+    top: 0;
+    bottom: 0;
+    left: -26px;
+    right: -26px;
+    background:
+        radial-gradient(ellipse 4px 280px at 50% var(--glow, 50%),
+            #ffffff 0%, color-mix(in srgb, var(--salus-accent) 30%, #ffffff) 10%, var(--salus-accent) 35%,
+            color-mix(in srgb, var(--salus-accent) 40%, transparent) 60%, transparent 100%),
+        radial-gradient(ellipse 26px 640px at 50% var(--glow, 50%),
+            color-mix(in srgb, var(--salus-accent) 35%, transparent) 0%, transparent 100%);
+}
+
+.resize-handle-vertical .resize-glow::before {
+    left: 0;
+    right: 0;
+    top: -26px;
+    bottom: -26px;
+    background:
+        radial-gradient(ellipse 280px 4px at var(--glow, 50%) 50%,
+            #ffffff 0%, color-mix(in srgb, var(--salus-accent) 30%, #ffffff) 10%, var(--salus-accent) 35%,
+            color-mix(in srgb, var(--salus-accent) 40%, transparent) 60%, transparent 100%),
+        radial-gradient(ellipse 640px 26px at var(--glow, 50%) 50%,
+            color-mix(in srgb, var(--salus-accent) 35%, transparent) 0%, transparent 100%);
 }
 
 .resize-handle-horizontal {
