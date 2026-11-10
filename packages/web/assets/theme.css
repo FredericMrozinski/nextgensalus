@@ -23,6 +23,7 @@
     --salus-fg: #e6e6e6;
     --salus-fg-muted: #a9adba;
     --salus-fg-faint: #6c717d;
+    --salus-fg-hint: #a9a9a9; /* placeholder text in fields (the default level); the browsers' own placeholder gray */
     --salus-accent: #3a6df0;
     --salus-accent-fg: #ffffff;
     --salus-danger: #ff6369;
@@ -34,8 +35,8 @@
     --salus-icon-filter: brightness(0) invert(1);
     --salus-icon-fg: #fff;
     /* depth: higher levels sit in front and are lighter, deeper ones are darker (docs/guides/theming.md) */
-    --salus-depth-foreground-2: #31343a;
-    --salus-depth-foreground-1: #23262a;
+    --salus-depth-foreground-2: #35383e;
+    --salus-depth-foreground-1: #27292e;
     --salus-depth-default: #15171a;
     --salus-depth-background-1: #121315;
     --salus-depth-background-2: #0e0e10;
@@ -60,6 +61,7 @@
     --salus-fg: #1c1c1c;
     --salus-fg-muted: #505050;
     --salus-fg-faint: #8c8c8c;
+    --salus-fg-hint: #555555; /* placeholder text in fields (the default level) */
     --salus-accent: #2552c4;
     --salus-accent-fg: #ffffff;
     --salus-danger: #c9302c;
@@ -72,11 +74,11 @@
     --salus-icon-fg: #000;
     /* depth: higher levels sit in front and are lighter, deeper ones are darker (docs/guides/theming.md) */
     --salus-depth-foreground-2: #ffffff;
-    --salus-depth-foreground-1: #f7f7f7;
-    --salus-depth-default: #d9d9d9;
-    --salus-depth-background-1: #d1d1d1;
-    --salus-depth-background-2: #c8c8c8;
-    --salus-depth-background-3: #aeaeae; /* the deepest: between the panels of the workspace */
+    --salus-depth-foreground-1: #e2e2e2;
+    --salus-depth-default: #c4c4c4;
+    --salus-depth-background-1: #bababa;
+    --salus-depth-background-2: #afafaf;
+    --salus-depth-background-3: #909090; /* the deepest: between the panels of the workspace */
     /* separators: a darker line over a lighter one (see --salus-separator-below) */
     --salus-separator-dark: rgba(0, 0, 0, 0.14);
     --salus-separator-light: rgba(255, 255, 255, 0.9);
@@ -204,6 +206,12 @@
 
   input[type="checkbox"], input[type="radio"], input[type="range"], input[type="color"] {
     padding: 0;
+  }
+
+  /* The hint in an empty field ("Search…"): --salus-fg-hint is chosen to read on the default level in both themes. */
+  input::placeholder, textarea::placeholder {
+    color: var(--salus-fg-hint);
+    opacity: 1;
   }
 
   input:focus-visible, select:focus-visible, textarea:focus-visible, button:focus-visible {

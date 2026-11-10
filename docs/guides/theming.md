@@ -100,6 +100,7 @@ removes the outline, which is right for flat icon buttons (`background: none; bo
 |---|---|
 | `--salus-depth-*` | Backgrounds by depth; see [Depth](#depth) |
 | `--salus-fg`, `--salus-fg-muted`, `--salus-fg-faint` | Text, secondary text, hints |
+| `--salus-fg-hint` | Hint text over the default level, e.g. a field's placeholder (fields get it without any CSS) |
 | `--salus-accent`, `--salus-accent-fg` | Primary action color and text on it |
 | `--salus-danger`, `--salus-warning`, `--salus-success` | Status colors |
 | `--salus-border` | Outlines of boxes, fields, menus |

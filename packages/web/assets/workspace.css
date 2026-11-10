@@ -367,6 +367,11 @@ html, body {
     background-color: var(--salus-surface-2);
 }
 
+/* In the light theme --salus-border is lighter than the tab bar, so a tab that is not open gets a darker outline. */
+:root[data-theme="light"] .tab:not(.tab-active) {
+    border-color: rgba(0, 0, 0, 0.28);
+}
+
 .tab-active,
 .tab-active:hover {
     /* The stroke is a radial gradient, a circle centred on the tab, white near the middle of the top
