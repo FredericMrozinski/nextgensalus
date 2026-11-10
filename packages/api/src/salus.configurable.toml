@@ -9,6 +9,16 @@ type = "directory-path"
 default = ""
 
 [[setting]]
+key = "umask"
+name = "File permissions (umask)"
+description = """The umask Salus and all plugins work with: which permissions new files and folders do not get. 002: \
+your group may change them too (for projects that several users share, together with a shared group); 022: others may \
+only read them; 077: only you. Octal, as in the shell's umask command. Empty: keep the umask Salus was started with. Takes \
+effect after Salus is restarted."""
+type = "string"
+default = ""
+
+[[setting]]
 key = "theme"
 name = "Theme"
 description = "The colors of Salus and of all plugins: dark or light."

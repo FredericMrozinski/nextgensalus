@@ -33,6 +33,9 @@ const SALUS_CONFIGURABLE: &str = include_str!("salus.configurable.toml");
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct FrameworkConfig {
     pub plugins_dir: Option<PathBuf>,
+    /// The `umask` setting: the file mode creation mask Salus sets for itself at startup, so its plugin processes inherit
+    /// it. None: empty or invalid, the umask Salus was started with stays.
+    pub umask: Option<u32>,
 }
 
 /// What can be configured in Salus (`salus.configurable.toml`, embedded in the server).
@@ -44,7 +47,42 @@ pub fn salus_configurable() -> &'static Configurable {
 fn framework_config_from(values: &Map<String, Value>) -> FrameworkConfig {
     FrameworkConfig {
         plugins_dir: values.get("plugins_dir").and_then(Value::as_str).filter(|dir| !dir.is_empty()).map(PathBuf::from),
+        umask: values.get("umask").and_then(Value::as_str).and_then(|text| match parse_umask(text) {
+            Ok(umask) => umask,
+            Err(e) => {
+                warn!("Ignoring the umask setting: {e}");
+                None
+            }
+        }),
     }
+}
+
+/// A umask as written in the setting: octal digits, e.g. `002`, `0002`, `22` or `0o002`. Empty (or blank): None, keep the
+/// umask Salus was started with.
+fn parse_umask(text: &str) -> Result<Option<u32>, String> {
+    let text = text.trim();
+    if text.is_empty() {
+        return Ok(None);
+    }
+    let digits = text.strip_prefix("0o").unwrap_or(text);
+    match u32::from_str_radix(digits, 8) {
+        Ok(mask) if !digits.is_empty() && digits.len() <= 4 && mask <= 0o777 => Ok(Some(mask)),
+        _ => Err(format!("'{text}' is not a umask (octal, at most 777, e.g. 002 or 022)")),
+    }
+}
+
+/// Sets the process' umask from the `umask` setting. Called once at startup, before any plugin process is started (they
+/// inherit it, and so do the files they and Salus create). A change applies after a restart.
+fn apply_umask(config: &FrameworkConfig) {
+    let Some(mask) = config.umask else { return };
+    #[cfg(unix)]
+    {
+        // SAFETY: umask only sets the process' file mode creation mask; it cannot fail.
+        let previous = unsafe { libc::umask(mask as libc::mode_t) };
+        info!("umask set to {mask:03o} (was {previous:03o})");
+    }
+    #[cfg(not(unix))]
+    info!("The umask setting ({mask:03o}) only applies on Unix; ignored");
 }
 
 /// The framework configuration, read once (changes to `salus.toml` apply after a restart). A missing or
@@ -68,7 +106,7 @@ pub fn init() {
         Err(e) => warn!("Cannot create {}: {e}", path.display()),
     }
     info!("Framework configuration: {}", path.display());
-    framework_config();
+    apply_umask(framework_config());
 }
 
 /// The text of a config file for a configurable that has nothing set: every setting as a comment with its explanation and
@@ -281,6 +319,24 @@ fn write_stored(path: &Path, values: &Map<String, Value>) -> Result<(), ConfigEr
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn umask_setting_is_octal_or_empty() {
+        assert_eq!(parse_umask(""), Ok(None));
+        assert_eq!(parse_umask("  "), Ok(None));
+        assert_eq!(parse_umask("002"), Ok(Some(0o002)));
+        assert_eq!(parse_umask("0002"), Ok(Some(0o002)));
+        assert_eq!(parse_umask("22"), Ok(Some(0o022)));
+        assert_eq!(parse_umask("0o027"), Ok(Some(0o027)));
+        for bad in ["8", "abc", "0o", "1777", "-2", "00777x"] {
+            assert!(parse_umask(bad).is_err(), "{bad}");
+        }
+        let c = salus_configurable();
+        assert_eq!(framework_config_from(&c.effective(&updates(json!({"umask": "002"})))).umask, Some(0o002));
+        assert_eq!(framework_config_from(&c.effective(&updates(json!({"umask": "nonsense"})))).umask, None);
+        assert_eq!(framework_config_from(&c.effective(&updates(json!({})))).umask, None);
+    }
+
     use super::*;
     use serde_json::json;
 

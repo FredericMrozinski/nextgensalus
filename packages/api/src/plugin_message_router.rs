@@ -52,11 +52,11 @@ pub fn establish_backend_streams(
     socket_handle: BackendPluginSocketHandle
 ) -> JoinHandle<BackendPluginSocketHandle> {
     let task = async move {
-        info!("Waiting for plugin backend [{}] to connect to socket... (1/3)", be_pid); // TODO add socket details
+        debug!("Waiting for plugin backend [{}] to connect to socket... (1/3)", be_pid); // TODO add socket details
 
         let stream = socket_handle.accept().await.unwrap();
 
-        info!("Plugin backend [{}] connected to socket. Establishing stream... (2/3)", be_pid);
+        debug!("Plugin backend [{}] connected to socket. Establishing stream... (2/3)", be_pid);
 
         let (reader, writer) = tokio::io::split(stream);
 
@@ -72,7 +72,7 @@ pub fn establish_backend_streams(
             salus_control::send_frontend_attached(be_pid, fe_pid).await;
         }
 
-        info!("Established backend streams for backend plugin [{}]. (3/3)", be_pid);
+        info!("Plugin backend [{}] connected.", be_pid);
 
         socket_handle
     };

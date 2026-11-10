@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use thiserror::Error;
 use toml::Table;
 use dioxus::prelude::*;
-use log::info;
+use log::{debug, info};
 
 pub fn load_available_plugins() -> Vec<models::Plugin> {
     let root_path = get_plugins_root_path();
@@ -23,7 +23,7 @@ fn build_plugins_root_if_not_exists(path_buf: &PathBuf) {
         info!("Creating plugin root directory at: {}", path_buf.to_str().unwrap());
         std::fs::create_dir_all(path_buf).unwrap();
     } else {
-        info!("Plugin root directory found at: {}", path_buf.to_str().unwrap());
+        debug!("Plugin root directory found at: {}", path_buf.to_str().unwrap());
     }
 }
 
@@ -43,7 +43,7 @@ fn read_available_plugins_from_disk(plugin_dir: &str) -> Vec<models::Plugin> {
 
         if is_dir {
             if Path::new(&manifest_path_str).exists() {
-                info!("manifest.toml exists for {}", &manifest_path_str);
+                debug!("manifest.toml exists for {}", &manifest_path_str);
 
                 let manifest_content = fs::read_to_string(&manifest_path_str).unwrap();
                 let parse_res = parse_manifest(&manifest_content, &path_str);
@@ -51,7 +51,7 @@ fn read_available_plugins_from_disk(plugin_dir: &str) -> Vec<models::Plugin> {
                 if parse_res.is_err() {
                     error!("{}: {}", &manifest_path_str, parse_res.err().unwrap().to_string());
                 } else {
-                    info!("manifest.toml successfully read for {}", &manifest_path_str);
+                    debug!("manifest.toml successfully read for {}", &manifest_path_str);
                     valid_plugins.push(parse_res.unwrap());
                 }
             }

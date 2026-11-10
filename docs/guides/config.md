@@ -144,6 +144,7 @@ setting commented out (so it also lists what can be configured). The plugins' fi
 |---|---|---|
 | `theme` | `dark` | The colors of Salus and all plugins: `dark` or `light`. Applies at once. See [Theming](theming.md). |
 | `plugins_dir` | empty | Where plugins are installed. Empty means `plugins/` in the platform's data directory. A relative path is taken relative to the config root. Applies after a restart. |
+| `umask` | empty | The umask Salus sets for itself at startup; every plugin process inherits it, and with it the files they create. Octal, as in the shell (`002`: the group may write too, for shared projects; `022`: others read only). Empty keeps the umask Salus was started with; an invalid value is ignored with a warning in the log. Applies after a restart. |
 | `autostart` | `[]` | Plugins that Salus opens on its own after a login, in this order, as if each had been opened from the dock (their entry components). Only the page the login page leads to (`?from=login`) opens them, not a reload. Plugins that are not installed or have no entry component are skipped. Applies at the next login. |
 
 ## How the two sides get there
