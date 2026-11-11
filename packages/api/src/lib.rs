@@ -10,6 +10,9 @@ pub mod configurable;
 pub mod base_url;
 
 #[cfg(feature = "server")]
+mod plugin_installer;
+
+#[cfg(feature = "server")]
 mod plugin_library;
 
 #[cfg(feature = "server")]
