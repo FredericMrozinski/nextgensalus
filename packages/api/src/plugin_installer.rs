@@ -5,7 +5,7 @@
 //! -the second for the actual installation process, if the first function returns true
 
 use crate::models::Plugin;
-use log::info;
+use dioxus::prelude::*;
 use std::fs;
 use std::path::Path;
 use std::process::Command;
