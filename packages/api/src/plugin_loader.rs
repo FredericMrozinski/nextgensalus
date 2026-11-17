@@ -126,7 +126,8 @@ fn parse_manifest(manifest: &str, plugin_folder_name: &str) -> Result<models::Pl
     }?;
     let plugin_backend_specs = models::PluginBackendSpecification {
         lifetime,
-        entry_point_file_path: plugin_backend_entrypoint
+        entry_point_file_path: plugin_backend_entrypoint,
+        install_script_file_path: parse_install_script(&parsed_manifest, plugin_folder_name)?,
     };
 
     let frontend_components = parse_frontend_components(&parsed_manifest)?;
@@ -193,6 +194,25 @@ fn parse_icon(manifest: &Table) -> Result<Option<String>, ManifestError> {
     }
     Ok(Some(icon.to_string()))
 }
+
+/// Optional `install-script-file-path` of `[backend]`: a String describing the relative file location of the install script
+fn parse_install_script(manifest: &Table, plugin_folder: &str) -> Result<Option<String>, ManifestError> {
+    let Some(file) = manifest["backend"].as_table().and_then(|table| table.get("install-script-file-path")) else {
+        return Ok(None);
+    };
+    let file = file.as_str()
+        .ok_or_else(|| bad("[backend]: 'install-script-file-path' needs to carry a string value.".to_string()))?;
+    if !Path::new(file).components().all(|c| matches!(c, std::path::Component::Normal(_))) {
+        return Err(bad(format!(
+            "[backend]: install script '{file}' must be a path inside the plugin folder (relative, without '..').")));
+    }
+    let path = Path::new(plugin_folder).join(file);
+    if !path.is_file() {
+        return Err(bad(format!(
+            "[backend]: install script '{}' does not exist.", path.display())));
+    }
+    Ok(Some(file.to_string()))
+} 
 
 fn bad(message: String) -> ManifestError {
     ManifestError::BadManifest(message)
