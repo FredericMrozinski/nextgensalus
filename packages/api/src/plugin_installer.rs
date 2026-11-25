@@ -4,7 +4,7 @@
 //!
 //! -the second for the actual installation process, if the first function returns true
 
-use crate::models::Plugin;
+use crate::models::{InstallMethod::{self, Script}, Plugin};
 use dioxus::prelude::*;
 use std::fs;
 use std::path::Path;
@@ -48,13 +48,11 @@ fn build_ruleset(plugin_folder: &Path) -> Result<RulesetCreated, RulesetError> {
     Ruleset::default()
         .handle_access(AccessFs::from_all(abi))?
         .create()?
-        // the plugin folder: everything
         .add_rules(path_beneath_rules(&[plugin_folder], AccessFs::from_all(abi)))?
         .add_rules(path_beneath_rules(&["/dev/null"], AccessFs::from_file(abi)))?
         .add_rules(path_beneath_rules(&[resolv_conf], AccessFs::from_read(abi)))?
         .add_rules(path_beneath_rules(&["/usr", "/lib", "/lib64", "/bin", "/etc"], AccessFs::from_read(abi)))
-        // system folders: read and execute only
-        // ... second add_rules here, for /usr, /lib, /lib64, /bin, /etc, with AccessFs::from_read(abi)
+        
 }
 
 /// Runs the plugin's install script (if it has one) and records the installed
@@ -63,7 +61,7 @@ fn build_ruleset(plugin_folder: &Path) -> Result<RulesetCreated, RulesetError> {
 pub fn install(plugin: &Plugin) -> Result<(), InstallError> {
     info!("Installing plugin: {}", plugin.identifier());
 
-    if let Some(script) = &plugin.manifest.backend_specs.install_script_file_path {
+    if let Some(Script(script)) = &plugin.manifest.backend_specs.install_method {
         let plugin_folder = Path::new(&plugin.plugin_folder_name);
         let full_path = plugin_folder.join(script);
 

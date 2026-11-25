@@ -127,7 +127,7 @@ fn parse_manifest(manifest: &str, plugin_folder_name: &str) -> Result<models::Pl
     let plugin_backend_specs = models::PluginBackendSpecification {
         lifetime,
         entry_point_file_path: plugin_backend_entrypoint,
-        install_script_file_path: parse_install_script(&parsed_manifest, plugin_folder_name)?,
+        install_method: parse_install_method(&parsed_manifest, plugin_folder_name)?,
     };
 
     let frontend_components = parse_frontend_components(&parsed_manifest)?;
@@ -212,7 +212,54 @@ fn parse_install_script(manifest: &Table, plugin_folder: &str) -> Result<Option<
             "[backend]: install script '{}' does not exist.", path.display())));
     }
     Ok(Some(file.to_string()))
-} 
+}
+
+fn parse_python_version(manifest: &Table) -> Result<Option<String>, ManifestError> {
+    let Some(value) = manifest["backend"].as_table().and_then(|table| table.get("python-version")) else {
+        return Ok(None);
+    };
+    let version = value.as_str()
+        .ok_or_else(|| bad("[backend]: 'python-version' needs to carry a string value.".to_string()))?;
+    let valid = !version.is_empty() && version.chars().all(|c| c.is_ascii_digit() || c == '.');
+    if !valid {
+        return Err(bad(format!("[backend]: python-version '{version}' must look like '3.10' (digits and dots only).")));
+}
+    Ok(Some(version.to_string()))
+}
+
+fn parse_requirements(manifest: &Table, plugin_folder: &str) -> Result<Option<String>, ManifestError> {
+    let Some(file) = manifest["backend"].as_table().and_then(|table| table.get("requirements")) else {
+        return Ok(None);
+    };
+    let file = file.as_str()
+        .ok_or_else(|| bad("[backend]: 'requirements' needs to carry a string value.".to_string()))?;
+    if !Path::new(file).components().all(|c| matches!(c, std::path::Component::Normal(_))) {
+        return Err(bad(format!(
+            "[backend]: requirements '{file}' must be a path inside the plugin folder (relative, without '..').")));
+    }
+    let path = Path::new(plugin_folder).join(file);
+    if !path.is_file() {
+        return Err(bad(format!(
+            "[backend]: requirements '{}' does not exist.", path.display())));
+    }
+    Ok(Some(file.to_string()))
+}
+
+/// Optional install method of `[backend]`: either `install-script-file-path`,
+/// or `python-version` together with `requirements`.
+fn parse_install_method(manifest: &Table, plugin_folder: &str) -> Result<Option<models::InstallMethod>, ManifestError> {
+    let script = parse_install_script(manifest, plugin_folder)?;     // Option<String>
+    let version = parse_python_version(manifest)?;                    // Option<String>
+    let requirements = parse_requirements(manifest, plugin_folder)?;  // Option<String>
+
+    match (script, version, requirements) {
+        (None, None, None) => Ok(None),
+        (Some(s), None, None) => Ok(Some(models::InstallMethod::Script(s))),
+        (None, Some(v), Some(r)) => Ok(Some(models::InstallMethod::Python { version: v, requirements: r })),
+        (Some(_), _, _) => Err(bad("[backend]: use either 'install-script-file-path' or 'python-version' with 'requirements', not both.".to_string())),
+        _ => Err(bad("[backend]: 'python-version' and 'requirements' must be given together.".to_string())),
+    }
+}
 
 fn bad(message: String) -> ManifestError {
     ManifestError::BadManifest(message)

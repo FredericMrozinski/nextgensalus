@@ -13,10 +13,18 @@ pub struct PluginDescription {
 }
 
 #[derive(PartialEq, Clone, Serialize, Deserialize, Debug)]
+pub enum InstallMethod {
+    /// A script provided by the plugin developer, relative to the plugin folder.
+    Script(String),
+    /// A Python environment set up by Salus.
+    Python { version: String, requirements: String },
+}
+
+#[derive(PartialEq, Clone, Serialize, Deserialize, Debug)]
 pub struct PluginBackendSpecification {
     pub entry_point_file_path: String,
     pub lifetime: BackendLifetime,
-    pub install_script_file_path: Option<String>,
+    pub install_method: Option<InstallMethod>,
 }
 
 /// Panel of the workspace a frontend component opens in.
